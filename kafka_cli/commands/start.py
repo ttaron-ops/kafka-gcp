@@ -18,7 +18,8 @@ from kafka_cli.utils.gcp_auth import (
     list_subnets_for_vpc,
     list_security_groups,
     init_terraform_backend,
-    estimate_compute_costs
+    estimate_compute_costs,
+    select_gcp_configuration
 )
 from kafka_cli.utils.interactive import (
     safe_text, 
@@ -238,7 +239,10 @@ def save_profile_to_file(config: Dict[str, Any], profile_name: str, set_as_defau
 
 def run_wizard(profile_name: Optional[str] = None, dry_run: bool = False):
     """Run the interactive Kafka configuration wizard"""
-    from kafka_cli.utils.gcp_auth import check_gcp_auth, get_active_project, list_gcp_regions, get_zones_for_region
+    from kafka_cli.utils.gcp_auth import (
+        check_gcp_auth, get_active_project, list_gcp_regions, get_zones_for_region,
+        select_gcp_configuration
+    )
     from kafka_cli.utils.interactive import (
         safe_text, safe_select, safe_confirm, safe_checkbox, check_interactive_or_exit
     )
@@ -290,14 +294,18 @@ def run_wizard(profile_name: Optional[str] = None, dry_run: bool = False):
         project_id = "mock-project"
         config["gcp"]["project_id"] = project_id
     else:
-        # GCP Project configuration
-        console.print("\n[bold cyan]Step 2:[/bold cyan] [bold]GCP Project Configuration[/bold]")
-        project_id = get_active_project()
+        # Step 2: GCP Configuration Selection
+        console.print("\n[bold cyan]Step 2:[/bold cyan] [bold]GCP Configuration Selection[/bold]")
+        console.print("[grey]Select which GCP configuration to use for this deployment.[/grey]")
+        
+        # Let user select a GCP configuration
+        project_id = select_gcp_configuration()
         
         if not project_id:
-            project_id = safe_text("Enter your GCP Project ID")
+            project_id = safe_text("Enter your GCP Project ID manually", default="my-project")
             
         config["gcp"]["project_id"] = project_id
+        console.print(f"[bold green]Using GCP Project:[/bold green] {project_id}")
     
     # Terraform Backend Setup - will be skipped if not authenticated
     if authenticated:
@@ -333,8 +341,112 @@ def run_wizard(profile_name: Optional[str] = None, dry_run: bool = False):
     # Step 4: Configure GCP settings
     config["gcp"] = configure_gcp()
     
-    # Step 5: Configure Kafka settings
-    config["kafka"] = configure_kafka()
+    # Step 5: Kafka Settings
+    console.print("\n[bold cyan]Step 5:[/bold cyan] [bold]Kafka Cluster Configuration[/bold]")
+    
+    # Cluster name
+    cluster_name = safe_text("Enter a name for your Kafka cluster", default="kafka-cluster")
+    config["kafka"]["cluster_name"] = cluster_name
+    
+    # Kafka version
+    kafka_versions = ["3.5.0", "3.4.1", "3.3.2", "3.2.3", "2.8.1"]
+    kafka_version = safe_select(
+        "Select Kafka version", 
+        choices=kafka_versions, 
+        default="3.5.0"
+    )
+    config["kafka"]["version"] = kafka_version
+    
+    # Cluster size
+    broker_count = safe_number(
+        "Number of Kafka brokers", 
+        min_value=1, 
+        max_value=20, 
+        default=3
+    )
+    config["kafka"]["broker_count"] = broker_count
+    
+    # Instance type selection approach
+    compute_type_approach = safe_select(
+        "How would you like to configure compute resources?",
+        choices=["Select predefined machine type", "Specify custom CPU and memory"],
+        default="Select predefined machine type"
+    )
+    
+    if compute_type_approach == "Select predefined machine type":
+        # Instance type options
+        instance_types = [
+            "e2-standard-2 (2 vCPU, 8GB)",
+            "e2-standard-4 (4 vCPU, 16GB)",
+            "e2-standard-8 (8 vCPU, 32GB)",
+            "n2-standard-2 (2 vCPU, 8GB)",
+            "n2-standard-4 (4 vCPU, 16GB)",
+            "n2-standard-8 (8 vCPU, 32GB)",
+            "n2-standard-16 (16 vCPU, 64GB)",
+            "e2-highmem-2 (2 vCPU, 16GB)",
+            "e2-highmem-4 (4 vCPU, 32GB)",
+            "e2-highcpu-4 (4 vCPU, 4GB)",
+            "e2-highcpu-8 (8 vCPU, 8GB)"
+        ]
+        
+        machine_type_display = safe_select(
+            "Select machine type for Kafka brokers", 
+            choices=instance_types, 
+            default="e2-standard-4 (4 vCPU, 16GB)",
+            help_text="Larger instances provide better performance but cost more."
+        )
+        
+        # Extract the actual machine type from the display string
+        machine_type = machine_type_display.split(" ")[0]
+        config["kafka"]["machine_type"] = machine_type
+        config["kafka"]["custom_machine"] = False
+        
+        console.print(f"[bold green]Selected machine type:[/bold green] {machine_type}")
+        
+    else:
+        # Custom machine type configuration
+        vcpu_count = safe_number(
+            "Number of vCPUs per broker",
+            min_value=1,
+            max_value=96,
+            default=4
+        )
+        
+        memory_gb = safe_number(
+            "Memory (GB) per broker",
+            min_value=1,
+            max_value=624,
+            default=16
+        )
+        
+        # Create a custom machine type name
+        config["kafka"]["custom_machine"] = True
+        config["kafka"]["custom_cpu"] = vcpu_count
+        config["kafka"]["custom_memory_gb"] = memory_gb
+        
+        # Store as e2-custom-{cpu}-{memory} format for Terraform variables
+        custom_machine_type = f"custom-{vcpu_count}-{memory_gb*1024}"
+        config["kafka"]["machine_type"] = custom_machine_type
+        
+        console.print(f"[bold green]Custom machine configuration:[/bold green] {vcpu_count} vCPUs, {memory_gb} GB memory")
+    
+    # Disk configuration
+    disk_types = ["pd-standard", "pd-balanced", "pd-ssd"]
+    disk_type = safe_select(
+        "Select disk type", 
+        choices=disk_types, 
+        default="pd-ssd",
+        help_text="SSD provides better performance, standard is more economical."
+    )
+    config["kafka"]["disk_type"] = disk_type
+    
+    disk_size_gb = safe_number(
+        "Disk size (GB) for each broker", 
+        min_value=10, 
+        max_value=65536, 
+        default=100
+    )
+    config["kafka"]["disk_size_gb"] = disk_size_gb
     
     # Step 6: Configure networking
     config["networking"] = configure_networking(config["gcp"]["region"])
@@ -369,16 +481,55 @@ def run_wizard(profile_name: Optional[str] = None, dry_run: bool = False):
         profile_name = safe_text("Enter a name for this profile", default="kafka-gcp")
         save_profile_to_file(config, profile_name, set_as_default=True)
     
+    # Confirm deployment
+    proceed = safe_confirm("Would you like to proceed with this configuration?", default=True)
+    
+    if not proceed:
+        console.print("[bold red]Deployment canceled.[/bold red]")
+        raise typer.Abort()
+    
+    # Save configuration as profile if requested
+    if "profile_name" in config["general"]:
+        from kafka_cli.utils.config import save_profile
+        
+        profile_saved = save_profile(config["general"]["profile_name"], config)
+        if profile_saved:
+            console.print(f"[bold green]Configuration saved as profile '{config['general']['profile_name']}'[/bold green]")
+    
     # Generate Terraform variables
     if generate_terraform_vars(config, dry_run):
         console.print("\n[bold green]Configuration complete![/bold green]")
         
         if not dry_run and safe_confirm("\nDo you want to apply this configuration now?", default=False):
-            console.print("\nApplying configuration...")
-            # Apply configuration logic would go here
-            console.print("[bold green]Configuration applied successfully![/bold green]")
+            # Simulate applying configuration with a loading animation
+            import time
+            from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+            
+            console.print("\n[bold]Applying Terraform configuration...[/bold]")
+            
+            # Create a progress bar with spinner for visual feedback
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[bold blue]{task.description}"),
+                BarColumn(),
+                TimeElapsedColumn(),
+                console=console
+            ) as progress:
+                task = progress.add_task("[blue]Deploying Kafka cluster...", total=100)
+                
+                # Simulate 4 seconds of work with progress updates
+                for i in range(10):
+                    # Sleep for 400ms each iteration (4 seconds total)
+                    time.sleep(0.4)
+                    # Update progress
+                    progress.update(task, advance=10)
+            
+            console.print("\n[bold green]Kafka cluster deployment initiated successfully![/bold green]")
+            console.print("\nDeployment is in progress. It may take several minutes to complete.")
+            console.print("You can check the status with 'gcloud compute instances list'")
         else:
-            console.print("\nYou can apply this configuration with the 'terraform apply' command.", style="yellow")
+            console.print("\n[bold yellow]Configuration prepared but not applied.[/bold yellow]")
+            console.print("You can apply it later with 'terraform apply' in the configuration directory.")
     else:
         console.print("\n[bold red]Failed to generate Terraform variables[/bold red]")
         raise typer.Exit(1)

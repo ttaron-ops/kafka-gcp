@@ -79,6 +79,127 @@ def get_active_project() -> Optional[str]:
         console.print(f"[bold red]Error:[/bold red] {str(e)}")
         return None
 
+def list_gcp_configurations() -> List[Dict]:
+    """List all available GCP configurations and mark the active one"""
+    try:
+        if not is_gcloud_installed():
+            console.print("[bold yellow]Cannot list GCP configurations:[/bold yellow] Google Cloud SDK not installed.")
+            return []
+            
+        result = subprocess.run(
+            ["gcloud", "config", "configurations", "list", "--format", "json"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        
+        configurations = json.loads(result.stdout)
+        return configurations
+        
+    except subprocess.CalledProcessError as e:
+        console.print(f"[bold red]Error listing GCP configurations:[/bold red] {str(e)}")
+        return []
+    except Exception as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        return []
+
+def activate_gcp_configuration(config_name: str) -> bool:
+    """Activate a specific GCP configuration"""
+    try:
+        if not is_gcloud_installed():
+            console.print("[bold yellow]Cannot activate GCP configuration:[/bold yellow] Google Cloud SDK not installed.")
+            return False
+            
+        result = subprocess.run(
+            ["gcloud", "config", "configurations", "activate", config_name],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        
+        console.print(f"[bold green]Activated GCP configuration:[/bold green] {config_name}")
+        return True
+        
+    except subprocess.CalledProcessError as e:
+        console.print(f"[bold red]Error activating GCP configuration:[/bold red] {str(e)}")
+        return False
+    except Exception as e:
+        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        return False
+
+def select_gcp_configuration() -> Optional[str]:
+    """
+    Display available GCP configurations and let the user select one.
+    Returns the project ID of the selected configuration.
+    """
+    from kafka_cli.utils.interactive import safe_select
+    
+    try:
+        if not is_gcloud_installed():
+            console.print("[bold yellow]Cannot select GCP configuration:[/bold yellow] Google Cloud SDK not installed.")
+            return None
+            
+        # Get all available configurations
+        configurations = list_gcp_configurations()
+        if not configurations:
+            console.print("[bold yellow]No GCP configurations found.[/bold yellow]")
+            console.print("Please run [bold]gcloud init[/bold] to set up a configuration.")
+            return None
+            
+        # Mark active configuration and build selection list
+        active_config = next((c for c in configurations if c.get("is_active", False)), None)
+        
+        # Build options list
+        options = []
+        config_mapping = {}
+        
+        for config in configurations:
+            name = config.get("name", "")
+            project = config.get("properties", {}).get("core", {}).get("project", "Not set")
+            account = config.get("properties", {}).get("core", {}).get("account", "Not set")
+            
+            # Create display option
+            is_active = config.get("is_active", False)
+            display = f"{name} - Project: {project}, Account: {account}"
+            if is_active:
+                display += " [ACTIVE]"
+                
+            options.append(display)
+            config_mapping[display] = config
+        
+        # Current project from active config
+        current_project = active_config.get("properties", {}).get("core", {}).get("project", "") if active_config else ""
+        
+        # Let user select
+        console.print("\n[bold]GCP Configuration Selection[/bold]")
+        if active_config:
+            console.print(f"Currently active: [bold cyan]{active_config.get('name')}[/bold cyan] (Project: {current_project})")
+        
+        # If only one configuration and it's active, return its project
+        if len(configurations) == 1 and active_config:
+            console.print("[bold green]Using the only available GCP configuration.[/bold green]")
+            return current_project
+            
+        selected = safe_select(
+            "Select GCP configuration to use",
+            choices=options,
+            default=next((o for o in options if "[ACTIVE]" in o), None)
+        )
+        
+        # Activate the selected configuration if it's not already active
+        selected_config = config_mapping[selected]
+        if not selected_config.get("is_active", False):
+            activated = activate_gcp_configuration(selected_config.get("name", ""))
+            if not activated:
+                return None
+        
+        # Return the project ID from the selected configuration
+        return selected_config.get("properties", {}).get("core", {}).get("project", "")
+        
+    except Exception as e:
+        console.print(f"[bold red]Error selecting GCP configuration:[/bold red] {str(e)}")
+        return None
+
 def list_gcp_regions() -> List[str]:
     """Get list of available GCP regions"""
     if not is_gcloud_installed():
