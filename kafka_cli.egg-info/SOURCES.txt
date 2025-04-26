@@ -1,3 +1,4 @@
+LICENSE
 README.md
 pyproject.toml
 kafka_cli/__init__.py
@@ -19,5 +20,6 @@ kafka_cli/templates/__init__.py
 kafka_cli/terraform/__init__.py
 kafka_cli/utils/__init__.py
 kafka_cli/utils/config.py
+kafka_cli/utils/gcp_auth.py
 kafka_cli/utils/interactive.py
 kafka_cli/utils/terraform.py

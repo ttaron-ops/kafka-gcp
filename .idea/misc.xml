@@ -7,5 +7,5 @@
       </MTProjectMetadataState>
     </option>
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="uv (kafka-cli)" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="uv (kafka-gcp)" project-jdk-type="Python SDK" />
 </project>

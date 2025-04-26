@@ -4,6 +4,7 @@ Version: 0.1.0
 Summary: Interactive CLI tool for provisioning and managing Kafka clusters on GCP
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
+License-File: LICENSE
 Requires-Dist: typer>=0.9.0
 Requires-Dist: questionary>=2.0.1
 Requires-Dist: rich>=13.4.2
@@ -22,6 +23,7 @@ Requires-Dist: black>=23.3.0; extra == "dev"
 Requires-Dist: isort>=5.12.0; extra == "dev"
 Requires-Dist: flake8>=6.0.0; extra == "dev"
 Requires-Dist: mypy>=1.3.0; extra == "dev"
+Dynamic: license-file
 
 # Kafka-CLI
 

@@ -4,20 +4,55 @@ import yaml
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
-from typing import Optional, Dict, Any
+from rich.table import Table
+from typing import Optional, Dict, Any, List, Tuple
 
 from kafka_cli.utils.config import get_config, update_config, get_config_dir
 from kafka_cli.utils.terraform import generate_terraform_vars
+from kafka_cli.utils.gcp_auth import (
+    check_gcp_auth,
+    get_active_project,
+    list_gcp_regions,
+    get_zones_for_region,
+    list_gcp_vpcs,
+    list_subnets_for_vpc,
+    list_security_groups,
+    init_terraform_backend,
+    estimate_compute_costs
+)
 from kafka_cli.utils.interactive import (
     safe_text, 
     safe_select, 
     safe_confirm, 
-    is_interactive
+    is_interactive,
+    safe_multiselect,
+    safe_number,
+    safe_password,
+    safe_path,
+    check_interactive_or_exit
 )
 
 app = typer.Typer(help="Start the interactive Kafka cluster provisioning wizard")
 console = Console()
 
+# Kafka versions to offer
+KAFKA_VERSIONS = ["3.3.1", "3.4.0", "3.4.1", "3.5.0", "3.5.1", "3.6.0"]
+# Storage types to offer
+STORAGE_TYPES = ["pd-standard", "pd-balanced", "pd-ssd"]
+# Machine types mapped to vCPU and memory
+MACHINE_TYPES = {
+    "e2-standard-2": {"vCPU": 2, "RAM": 8},
+    "e2-standard-4": {"vCPU": 4, "RAM": 16},
+    "e2-standard-8": {"vCPU": 8, "RAM": 32},
+    "e2-standard-16": {"vCPU": 16, "RAM": 64},
+    "n2-standard-2": {"vCPU": 2, "RAM": 8},
+    "n2-standard-4": {"vCPU": 4, "RAM": 16},
+    "n2-standard-8": {"vCPU": 8, "RAM": 32},
+    "n2-standard-16": {"vCPU": 16, "RAM": 64},
+}
+
+# Authentication methods
+AUTH_METHODS = ["none", "ssl"]
 
 @app.callback(invoke_without_command=True)
 def main(
@@ -202,326 +237,540 @@ def save_profile_to_file(config: Dict[str, Any], profile_name: str, set_as_defau
 
 
 def run_wizard(profile_name: Optional[str] = None, dry_run: bool = False):
-    """
-    Run the interactive wizard to configure and provision a Kafka cluster
-    """
-    # Check if we're in an interactive environment
-    if not is_interactive():
-        console.print("[bold red]Error:[/bold red] This command requires an interactive terminal.")
-        console.print("Please run this command in a terminal where you can provide input.")
-        console.print("\nFor automation purposes, use non-interactive mode instead:")
-        console.print("kafka-cli start --non-interactive --project-id=YOUR_PROJECT_ID [other options]")
-        raise typer.Exit(1)
+    """Run the interactive Kafka configuration wizard"""
+    from kafka_cli.utils.gcp_auth import check_gcp_auth, get_active_project, list_gcp_regions, get_zones_for_region
+    from kafka_cli.utils.interactive import (
+        safe_text, safe_select, safe_confirm, safe_checkbox, check_interactive_or_exit
+    )
+    from kafka_cli.utils.terraform import generate_terraform_vars
+
+    # Check if running in interactive mode
+    check_interactive_or_exit()
     
-    try:
-        welcome_message()
+    # Welcome panel
+    console.print(Panel(
+        renderable="\n[bold]Kafka on GCP Deployment Wizard[/bold]\n\n"
+        "This wizard will guide you through setting up a Kafka cluster on Google Cloud Platform.\n"
+        "You'll configure GCP resources, Kafka settings, networking, and monitoring options.\n\n"
+        "Tip: You can save your configuration as a profile for future use.",
+        title="Welcome",
+        expand=False,
+        width=85
+    ))
+    
+    # Initialize configuration dictionary
+    config = {
+        "general": {},
+        "gcp": {},
+        "kafka": {},
+        "networking": {},
+        "security": {},
+        "monitoring": {},
+        "tags": {}
+    }
+    
+    # Optional profile name
+    if not profile_name:
+        use_profile = safe_confirm("Would you like to save this configuration as a named profile?", default=True)
+        if use_profile:
+            profile_name = safe_text("Enter a name for this profile", default="default")
+            config["general"]["profile_name"] = profile_name
+    else:
+        config["general"]["profile_name"] = profile_name
         
-        # Load configuration or profile if specified
-        config = {}
-        if profile_name:
-            # Load existing profile
-            profile_path = os.path.join(get_config_dir(), "profiles", f"{profile_name}.yaml")
-            if os.path.exists(profile_path):
-                console.print(f"Loading profile: [bold cyan]{profile_name}[/bold cyan]")
-                with open(profile_path, 'r') as f:
-                    config = yaml.safe_load(f)
-            else:
-                console.print(f"Profile [bold red]{profile_name}[/bold red] not found", style="red")
-                return
+    # Step 1: Check GCP Authentication
+    console.print("\n[bold cyan]Step 1:[/bold cyan] [bold]Checking GCP Authentication[/bold]")
+    authenticated = check_gcp_auth()
+    
+    if not authenticated:
+        # If gcloud is not installed, we'll continue with default values and mock data
+        console.print("\n[yellow]Continuing in mock mode with default values since gcloud is not available.[/yellow]")
+        console.print("[yellow]Some features will be limited without GCP authentication.[/yellow]")
+        # Set a default project ID
+        project_id = "mock-project"
+        config["gcp"]["project_id"] = project_id
+    else:
+        # GCP Project configuration
+        console.print("\n[bold cyan]Step 2:[/bold cyan] [bold]GCP Project Configuration[/bold]")
+        project_id = get_active_project()
         
-        # Step 1: GCP Configuration
-        console.print("\n[bold]Step 1: GCP Configuration[/bold]")
-        gcp_config = configure_gcp()
-        if not gcp_config:
-            return
-        config["gcp"] = gcp_config
-        
-        # Step 2: Networking Configuration
-        console.print("\n[bold]Step 2: Networking Configuration[/bold]")
-        networking_config = configure_networking()
-        if not networking_config:
-            return
-        config["networking"] = networking_config
-        
-        # Step 3: Kafka Configuration
-        console.print("\n[bold]Step 3: Kafka Configuration[/bold]")
-        kafka_config = configure_kafka()
-        if not kafka_config:
-            return
-        config["kafka"] = kafka_config
-        
-        # Step 4: Add-ons Configuration
-        console.print("\n[bold]Step 4: Add-ons Configuration[/bold]")
-        addons_config = configure_addons()
-        if not addons_config:
-            return
-        config["addons"] = addons_config
-        
-        # Display summary
-        display_summary(config)
-        
-        # Ask for confirmation
-        if not safe_confirm("Proceed with this configuration?", default=True):
-            console.print("Configuration canceled.", style="yellow")
-            return
-        
-        # Save configuration
-        save_profile = safe_confirm("Save this configuration as a profile?", default=True)
-        if save_profile:
-            profile_name = safe_text("Profile name:", default="default")
-            save_profile_to_file(config, profile_name, set_as_default=True)
-        
-        # Generate Terraform variables
-        if generate_terraform_vars(config, dry_run):
-            console.print("\n[bold green]Configuration complete![/bold green]")
+        if not project_id:
+            project_id = safe_text("Enter your GCP Project ID")
             
-            if not dry_run:
-                if safe_confirm("Apply this configuration now?", default=False):
-                    console.print("\nApplying configuration...")
-                    # Apply configuration logic would go here
-                    console.print("[bold green]Configuration applied successfully![/bold green]")
-                else:
-                    console.print("\nYou can apply this configuration later with the 'terraform apply' command.", style="yellow")
-        else:
-            console.print("\n[bold red]Failed to generate Terraform variables[/bold red]")
+        config["gcp"]["project_id"] = project_id
+    
+    # Terraform Backend Setup - will be skipped if not authenticated
+    if authenticated:
+        console.print("\n[bold cyan]Step 3:[/bold cyan] [bold]Terraform Backend Configuration[/bold]")
+        console.print("[grey]Terraform uses a backend to store state files.[/grey]")
         
-    except Exception as e:
-        console.print(f"[bold red]Error running wizard:[/bold red] {str(e)}")
-        console.print("This command requires a fully interactive terminal.")
-        console.print("Please run in a standard terminal application.")
-        console.print("\nAlternatively, use non-interactive mode:")
-        console.print("kafka-cli start --non-interactive --project-id=YOUR_PROJECT_ID [other options]")
+        use_remote = safe_confirm("Would you like to use a remote backend (GCS bucket) for Terraform state?", default=True)
+        if use_remote:
+            bucket_name = safe_text("Enter the GCS bucket name for Terraform state", default=f"terraform-state-{project_id}")
+            prefix = safe_text("Enter a prefix for state files", default="kafka")
+            
+            config["terraform"] = {
+                "backend_type": "gcs",
+                "bucket": bucket_name,
+                "prefix": prefix
+            }
+            
+            # Initialize the backend if authenticated
+            from kafka_cli.utils.gcp_auth import init_terraform_backend
+            init_terraform_backend(bucket_name, prefix)
+        else:
+            console.print("[yellow]Using local Terraform state storage.[/yellow]")
+            config["terraform"] = {
+                "backend_type": "local"
+            }
+    else:
+        # Default to local backend if not authenticated
+        console.print("[yellow]Using local Terraform state storage since GCP is not authenticated.[/yellow]")
+        config["terraform"] = {
+            "backend_type": "local"
+        }
+    
+    # Step 4: Configure GCP settings
+    config["gcp"] = configure_gcp()
+    
+    # Step 5: Configure Kafka settings
+    config["kafka"] = configure_kafka()
+    
+    # Step 6: Configure networking
+    config["networking"] = configure_networking(config["gcp"]["region"])
+    
+    # Step 7: Configure additional options
+    config["auth"] = configure_auth()
+    
+    # Step 8: Configure monitoring and addons
+    config["monitoring"] = configure_monitoring()
+    
+    # Step 9: Configure labels/tags
+    config["labels"] = configure_labels()
+    
+    # Calculate estimated costs if enabled
+    if "compute_estimate" in config["kafka"] and config["kafka"]["compute_estimate"]:
+        estimated_costs = estimate_compute_costs(
+            region=config["gcp"]["region"],
+            instance_type=config["kafka"]["machine_type"],
+            num_instances=config["kafka"]["broker_count"],
+            disk_type=config["kafka"]["storage_type"],
+            disk_size_gb=config["kafka"]["storage_size"]
+        )
+        if estimated_costs:
+            config["kafka"]["estimated_costs"] = estimated_costs
+    
+    # Display configuration summary
+    console.print("\n[bold]Configuration Summary:[/bold]")
+    display_summary(config)
+    
+    # Save configuration as profile
+    if safe_confirm("\nDo you want to save this configuration as a profile?", default=True):
+        profile_name = safe_text("Enter a name for this profile", default="kafka-gcp")
+        save_profile_to_file(config, profile_name, set_as_default=True)
+    
+    # Generate Terraform variables
+    if generate_terraform_vars(config, dry_run):
+        console.print("\n[bold green]Configuration complete![/bold green]")
+        
+        if not dry_run and safe_confirm("\nDo you want to apply this configuration now?", default=False):
+            console.print("\nApplying configuration...")
+            # Apply configuration logic would go here
+            console.print("[bold green]Configuration applied successfully![/bold green]")
+        else:
+            console.print("\nYou can apply this configuration with the 'terraform apply' command.", style="yellow")
+    else:
+        console.print("\n[bold red]Failed to generate Terraform variables[/bold red]")
         raise typer.Exit(1)
 
 
 def configure_gcp() -> Dict[str, Any]:
     """Configure GCP settings"""
-    config = get_config().get("gcp", {})
+    console.print("\n[bold cyan]GCP Configuration[/bold cyan]")
     
-    # Ask for GCP project ID
-    project_id = safe_text(
-        "GCP Project ID:",
-        default=config.get("project_id", "")
-    )
-    
+    # Get active project
+    project_id = get_active_project()
     if not project_id:
-        console.print("Project ID is required", style="red")
-        return None
+        project_id = safe_text("Enter your GCP Project ID:", default="")
     
-    # Ask for region
+    # Get regions
+    regions = list_gcp_regions()
     region = safe_select(
-        "Select GCP Region:",
-        choices=[
-            "us-central1",
-            "us-east1",
-            "us-west1",
-            "europe-west1",
-            "asia-northeast1",
-        ],
-        default=config.get("region", "us-central1")
+        "Select GCP region:",
+        choices=regions,
+        default="us-central1" if "us-central1" in regions else regions[0]
     )
     
-    # Ask for zone
-    zone = safe_select(
-        "Select GCP Zone:",
-        choices=[f"{region}-a", f"{region}-b", f"{region}-c"],
-        default=config.get("zone", f"{region}-a")
+    # Get zones for the selected region
+    zones = get_zones_for_region(region)
+    selected_zones = safe_multiselect(
+        "Select availability zones:",
+        choices=zones,
+        default=[zones[0]] if zones else []
     )
-    
-    return {"project_id": project_id, "region": region, "zone": zone}
-
-
-def configure_networking() -> Dict[str, Any]:
-    """Configure networking settings"""
-    # Start with default values
-    network_name = safe_text(
-        "VPC Network Name:",
-        default="kafka-network"
-    )
-    
-    # Network CIDR
-    network_cidr = safe_text(
-        "Network CIDR:",
-        default="10.0.0.0/16"
-    )
-    
-    # Subnet CIDR
-    subnet_cidr = safe_text(
-        "Subnet CIDR:",
-        default="10.0.1.0/24"
-    )
-    
-    # VPC Peering
-    enable_peering = safe_confirm(
-        "Enable VPC Peering?",
-        default=False
-    )
-    
-    peering_network = None
-    if enable_peering:
-        peering_network = safe_text(
-            "Peering Network Name:"
-        )
     
     return {
-        "network_name": network_name,
-        "network_cidr": network_cidr,
-        "subnet_cidr": subnet_cidr,
-        "enable_peering": enable_peering,
-        "peering_network": peering_network,
+        "project_id": project_id,
+        "region": region,
+        "zones": selected_zones
+    }
+
+
+def configure_networking(region: str) -> Dict[str, Any]:
+    """Configure networking settings"""
+    console.print("\n[bold cyan]Networking Configuration[/bold cyan]")
+    
+    # Get existing VPCs
+    vpcs = list_gcp_vpcs()
+    vpc_names = [vpc["name"] for vpc in vpcs] + ["Create new VPC"]
+    
+    vpc_selection = safe_select(
+        "Select VPC network:",
+        choices=vpc_names,
+        default="Create new VPC"
+    )
+    
+    if vpc_selection == "Create new VPC":
+        vpc_name = safe_text("Enter name for the new VPC:", default="kafka-vpc")
+        network_cidr = safe_text("Enter network CIDR block:", default="10.0.0.0/16")
+        create_new_vpc = True
+        selected_subnets = []
+    else:
+        vpc_name = vpc_selection
+        create_new_vpc = False
+        
+        # Get existing subnets for the selected VPC
+        subnets = list_subnets_for_vpc(vpc_name)
+        # Filter subnets by region
+        region_subnets = [subnet for subnet in subnets if region in subnet.get("region", "")]
+        
+        if region_subnets:
+            subnet_choices = [f"{subnet['name']} ({subnet['ipCidrRange']})" for subnet in region_subnets]
+            selected_subnet_names = safe_multiselect(
+                f"Select subnets in {region}:",
+                choices=subnet_choices,
+                default=[subnet_choices[0]] if subnet_choices else []
+            )
+            # Extract just the subnet names from the display string
+            selected_subnets = [name.split(" ")[0] for name in selected_subnet_names]
+        else:
+            console.print(f"[yellow]No existing subnets found in {region} for VPC {vpc_name}[/yellow]")
+            subnet_name = safe_text(f"Enter name for new subnet in {region}:", default=f"kafka-subnet-{region}")
+            subnet_cidr = safe_text("Enter subnet CIDR block:", default="10.0.1.0/24")
+            selected_subnets = [subnet_name]
+            create_new_vpc = True  # We'll need to create the subnet
+    
+    # Get security groups (firewall rules in GCP)
+    firewall_rules = list_security_groups()
+    if firewall_rules:
+        sg_choices = [f"{rule['name']} ({rule.get('description', 'No description')})" for rule in firewall_rules]
+        selected_sg_names = safe_multiselect(
+            "Select firewall rules (security groups):",
+            choices=sg_choices,
+            default=[]
+        )
+        # Extract just the rule names from the display string
+        selected_sgs = [name.split(" ")[0] for name in selected_sg_names]
+    else:
+        selected_sgs = []
+    
+    # Client CIDR allowlist
+    client_cidrs = safe_text(
+        "Enter client CIDR allowlist (one per line, leave blank to allow all):",
+        multiline=True,
+        default="0.0.0.0/0"
+    )
+    client_cidr_list = [cidr.strip() for cidr in client_cidrs.split("\n") if cidr.strip()]
+    
+    return {
+        "vpc_name": vpc_name,
+        "create_new_vpc": create_new_vpc,
+        "network_cidr": network_cidr if 'network_cidr' in locals() else "10.0.0.0/16",
+        "subnets": selected_subnets,
+        "security_groups": selected_sgs,
+        "client_cidr_allowlist": client_cidr_list
     }
 
 
 def configure_kafka() -> Dict[str, Any]:
     """Configure Kafka settings"""
-    # Number of brokers
-    broker_count = int(safe_select(
-        "Number of Kafka Brokers:",
-        choices=["1", "3", "5", "7"],
-        default="3"
-    ))
+    console.print("\n[bold cyan]Kafka Configuration[/bold cyan]")
     
-    # Machine type
-    machine_type = safe_select(
-        "Machine Type:",
-        choices=[
-            "e2-standard-2",
-            "e2-standard-4",
-            "e2-standard-8",
-            "n2-standard-2",
-            "n2-standard-4",
-            "n2-standard-8",
-        ],
-        default="e2-standard-4"
-    )
-    
-    # Disk size
-    disk_size = int(safe_text(
-        "Disk Size (GB):",
-        default="100"
-    ))
+    # Cluster name
+    cluster_name = safe_text("Enter a name for your Kafka cluster:", default="kafka-cluster")
     
     # Kafka version
     kafka_version = safe_select(
-        "Kafka Version:",
-        choices=["3.4.0", "3.3.2", "3.2.3", "3.1.2"],
-        default="3.4.0"
+        "Select Kafka version:",
+        choices=KAFKA_VERSIONS,
+        default=KAFKA_VERSIONS[-1]  # Latest version
     )
     
-    # KRaft mode
-    kraft_mode = safe_confirm(
-        "Use KRaft Mode (no ZooKeeper)?",
-        default=True
+    # Number of brokers
+    broker_count = safe_number(
+        "Enter the number of Kafka brokers:",
+        min_value=1,
+        max_value=20,
+        default=3
     )
+    
+    # vCPU and RAM selection
+    vcpu_count = safe_number(
+        "Enter vCPU per broker:",
+        min_value=1,
+        max_value=64,
+        default=4
+    )
+    
+    ram_gb = safe_number(
+        "Enter RAM per broker (GB):",
+        min_value=2,
+        max_value=256,
+        default=16
+    )
+    
+    # Find the closest machine type based on vCPU and RAM
+    suitable_machines = []
+    for machine, specs in MACHINE_TYPES.items():
+        if specs["vCPU"] >= vcpu_count and specs["RAM"] >= ram_gb:
+            suitable_machines.append((machine, specs))
+    
+    if suitable_machines:
+        # Sort by closest match (least excess resources)
+        suitable_machines.sort(key=lambda x: (x[1]["vCPU"] - vcpu_count) + (x[1]["RAM"] - ram_gb))
+        machine_type = suitable_machines[0][0]
+    else:
+        # Use the largest if no suitable match
+        machine_type = "n2-standard-16"
+    
+    # Storage type
+    storage_type = safe_select(
+        "Select storage type:",
+        choices=STORAGE_TYPES,
+        default="pd-ssd"
+    )
+    
+    # Storage size
+    storage_size = safe_number(
+        "Enter storage size (GB) per broker:",
+        min_value=10,
+        max_value=65536,
+        default=100
+    )
+    
+    # Enable Kafka UI
+    kafka_ui_enabled = safe_confirm("Enable Kafka UI?", default=True)
+    
+    # Compute cost estimation
+    compute_estimate = safe_confirm("Show compute cost estimation?", default=True)
     
     return {
-        "broker_count": broker_count,
-        "machine_type": machine_type,
-        "disk_size": disk_size,
+        "cluster_name": cluster_name,
         "kafka_version": kafka_version,
-        "kraft_mode": kraft_mode,
+        "broker_count": broker_count,
+        "vcpu_per_broker": vcpu_count,
+        "ram_per_broker": ram_gb,
+        "machine_type": machine_type,
+        "storage_type": storage_type,
+        "storage_size": storage_size,
+        "kafka_ui_enabled": kafka_ui_enabled,
+        "compute_estimate": compute_estimate
     }
 
 
-def configure_addons() -> Dict[str, Any]:
-    """Configure Kafka add-ons"""
-    addons = {}
+def configure_auth() -> Dict[str, Any]:
+    """Configure authentication settings"""
+    console.print("\n[bold cyan]Authentication Configuration[/bold cyan]")
     
-    # Kafka UI
-    if safe_confirm("Install Kafka UI?", default=True):
-        addons["kafka_ui"] = True
+    # Authentication method
+    auth_method = safe_select(
+        "Select authentication method:",
+        choices=AUTH_METHODS,
+        default="none",
+        help_text="none: No authentication; anyone who can reach the cluster can connect.\nssl: Clients authenticate using TLS client certificates."
+    )
     
-    # Prometheus
-    if safe_confirm("Install Prometheus?", default=True):
-        addons["prometheus"] = True
-        
-        # Kafka Exporter
-        if safe_confirm("Install Kafka Exporter?", default=True):
-            addons["kafka_exporter"] = True
+    tls_config = {}
     
-    # Grafana
-    if safe_confirm("Install Grafana?", default=True):
-        addons["grafana"] = True
-    
-    # Schema Registry
-    if safe_confirm("Install Schema Registry?", default=False):
-        addons["schema_registry"] = True
-    
-    # Deployment target for addons
-    if any(addons.values()):
-        deployment_target = safe_select(
-            "Deployment Target for Add-ons:",
-            choices=[
-                "GCP Cloud Run",
-                "GCP Compute Engine VM",
-                "Existing Kubernetes Cluster",
-            ],
-            default="GCP Compute Engine VM"
+    if auth_method == "ssl":
+        # TLS certificate option
+        tls_method = safe_select(
+            "TLS certificates:",
+            choices=["auto-generate", "upload"],
+            default="auto-generate"
         )
-        addons["deployment_target"] = deployment_target
         
-        if deployment_target == "Existing Kubernetes Cluster":
-            kubeconfig_path = safe_text(
-                "Kubeconfig Path (leave empty for default):",
-                default=""
+        tls_config["method"] = tls_method
+        
+        if tls_method == "upload":
+            cert_path = safe_path(
+                "Enter path to TLS certificate file (.pem or .p12):",
+                must_exist=True,
+                file_okay=True,
+                dir_okay=False
             )
-            addons["kubeconfig_path"] = kubeconfig_path or "~/.kube/config"
+            tls_config["cert_path"] = cert_path
     
-    return addons
+    return {
+        "auth_method": auth_method,
+        "tls_config": tls_config
+    }
+
+
+def configure_monitoring() -> Dict[str, Any]:
+    """Configure monitoring settings"""
+    console.print("\n[bold cyan]Monitoring Configuration[/bold cyan]")
+    
+    # Enable monitoring
+    monitoring_enabled = safe_confirm("Enable monitoring?", default=True)
+    
+    monitoring_config = {
+        "enabled": monitoring_enabled,
+        "ops_agent": False,
+        "grafana_export": False,
+        "grafana_host": "",
+        "grafana_api_key": ""
+    }
+    
+    if monitoring_enabled:
+        # Install Ops agent
+        monitoring_config["ops_agent"] = safe_confirm("Install Ops agent?", default=True)
+        
+        # Export to Grafana
+        monitoring_config["grafana_export"] = safe_confirm("Export Grafana dashboards?", default=False)
+        
+        if monitoring_config["grafana_export"]:
+            monitoring_config["grafana_host"] = safe_text("Enter Grafana host URL:", default="")
+            monitoring_config["grafana_api_key"] = safe_password("Enter Grafana API key:", default="")
+    
+    return monitoring_config
+
+
+def configure_labels() -> Dict[str, Any]:
+    """Configure labels/tags"""
+    console.print("\n[bold cyan]Labels/Tags Configuration[/bold cyan]")
+    
+    labels = {}
+    add_more = True
+    
+    while add_more:
+        key = safe_text("Enter label/tag key (or press Enter to finish):", default="")
+        if not key:
+            break
+            
+        value = safe_text(f"Enter value for {key}:", default="")
+        labels[key] = value
+        
+        if len(labels) > 0:
+            add_more = safe_confirm("Add another label/tag?", default=True)
+    
+    return labels
 
 
 def display_summary(config: Dict[str, Any]):
     """Display configuration summary"""
-    console.print("\n[bold]Configuration Summary:[/bold]")
+    # GCP section
+    if "gcp" in config:
+        gcp_table = Table(title="GCP Configuration")
+        gcp_table.add_column("Setting", style="cyan")
+        gcp_table.add_column("Value")
+        
+        gcp_table.add_row("Project ID", config["gcp"].get("project_id", "Not specified"))
+        gcp_table.add_row("Region", config["gcp"].get("region", "Not specified"))
+        
+        zones = config["gcp"].get("zones", [])
+        if zones:
+            gcp_table.add_row("Availability Zones", ", ".join(zones))
+        
+        console.print(gcp_table)
     
-    # GCP Configuration
-    gcp = config.get("gcp", {})
-    console.print("\n[bold cyan]GCP Configuration:[/bold cyan]")
-    console.print(f"  Project ID: {gcp.get('project_id')}")
-    console.print(f"  Region: {gcp.get('region')}")
-    console.print(f"  Zone: {gcp.get('zone')}")
+    # Kafka section
+    if "kafka" in config:
+        kafka_table = Table(title="Kafka Configuration")
+        kafka_table.add_column("Setting", style="cyan")
+        kafka_table.add_column("Value")
+        
+        for key, value in config["kafka"].items():
+            if key != "estimated_costs":  # Skip costs, will show separately
+                kafka_table.add_row(key.replace("_", " ").title(), str(value))
+        
+        console.print(kafka_table)
+        
+        # Show cost estimation if available
+        if "estimated_costs" in config["kafka"]:
+            costs = config["kafka"]["estimated_costs"]
+            cost_table = Table(title="Estimated Monthly Costs")
+            cost_table.add_column("Item", style="cyan")
+            cost_table.add_column("Cost (USD)")
+            
+            cost_table.add_row("Per Instance", f"${costs['instance_monthly_per_node']}")
+            cost_table.add_row("Per Storage", f"${costs['disk_monthly_per_node']}")
+            cost_table.add_row("Total (all nodes)", f"${costs['total_monthly']}")
+            
+            console.print(cost_table)
     
-    # Networking Configuration
-    network = config.get("networking", {})
-    console.print("\n[bold cyan]Networking Configuration:[/bold cyan]")
-    console.print(f"  Network Name: {network.get('network_name')}")
-    console.print(f"  Network CIDR: {network.get('network_cidr')}")
-    console.print(f"  Subnet CIDR: {network.get('subnet_cidr')}")
-    console.print(f"  VPC Peering: {'Enabled' if network.get('enable_peering') else 'Disabled'}")
-    if network.get("enable_peering"):
-        console.print(f"  Peering Network: {network.get('peering_network')}")
+    # Networking section
+    if "networking" in config:
+        network_table = Table(title="Network Configuration")
+        network_table.add_column("Setting", style="cyan")
+        network_table.add_column("Value")
+        
+        for key, value in config["networking"].items():
+            if isinstance(value, list):
+                network_table.add_row(key.replace("_", " ").title(), ", ".join(value))
+            else:
+                network_table.add_row(key.replace("_", " ").title(), str(value))
+        
+        console.print(network_table)
     
-    # Kafka Configuration
-    kafka = config.get("kafka", {})
-    console.print("\n[bold cyan]Kafka Configuration:[/bold cyan]")
-    console.print(f"  Broker Count: {kafka.get('broker_count')}")
-    console.print(f"  Machine Type: {kafka.get('machine_type')}")
-    console.print(f"  Disk Size: {kafka.get('disk_size')} GB")
-    console.print(f"  Kafka Version: {kafka.get('kafka_version')}")
-    console.print(f"  KRaft Mode: {'Enabled' if kafka.get('kraft_mode') else 'Disabled'}")
+    # Auth section
+    if "auth" in config:
+        auth_table = Table(title="Authentication Configuration")
+        auth_table.add_column("Setting", style="cyan")
+        auth_table.add_column("Value")
+        
+        auth_table.add_row("Auth Method", config["auth"].get("auth_method", "none"))
+        
+        if "tls_config" in config["auth"]:
+            for key, value in config["auth"]["tls_config"].items():
+                auth_table.add_row(key.replace("_", " ").title(), str(value))
+        
+        console.print(auth_table)
     
-    # Add-ons Configuration
-    addons = config.get("addons", {})
-    console.print("\n[bold cyan]Add-ons Configuration:[/bold cyan]")
-    addon_list = []
-    for addon, enabled in addons.items():
-        if addon not in ["deployment_target", "kubeconfig_path"] and enabled:
-            addon_list.append(addon.replace("_", " ").title())
+    # Monitoring section
+    if "monitoring" in config:
+        monitoring_table = Table(title="Monitoring Configuration")
+        monitoring_table.add_column("Setting", style="cyan")
+        monitoring_table.add_column("Value")
+        
+        for key, value in config["monitoring"].items():
+            if key != "grafana_api_key":  # Don't display API key
+                monitoring_table.add_row(key.replace("_", " ").title(), str(value))
+        
+        console.print(monitoring_table)
     
-    if addon_list:
-        console.print(f"  Enabled Add-ons: {', '.join(addon_list)}")
-        console.print(f"  Deployment Target: {addons.get('deployment_target')}")
-        if addons.get("deployment_target") == "Existing Kubernetes Cluster":
-            console.print(f"  Kubeconfig Path: {addons.get('kubeconfig_path')}")
-    else:
-        console.print("  No add-ons selected")
+    # Labels section
+    if "labels" in config and config["labels"]:
+        labels_table = Table(title="Labels/Tags")
+        labels_table.add_column("Key", style="cyan")
+        labels_table.add_column("Value")
+        
+        for key, value in config["labels"].items():
+            labels_table.add_row(key, value)
+        
+        console.print(labels_table)
 
 
 def welcome_message():
     """Display welcome message and tool information"""
-    title = Text("Kafka CLI - Interactive Kafka Cluster Wizard", style="bold green")
-    description = Text(
-        "This wizard will guide you through configuring and provisioning a Kafka cluster on GCP.\n"
-        "You'll be able to customize networking, Kafka settings, and add-ons."
-    )
-    console.print(Panel.fit(title, subtitle=description))
+    console.print(Panel(
+        Text.from_markup(
+            "[bold green]Kafka on GCP Deployment Wizard[/bold green]\n\n"
+            "This wizard will guide you through setting up a Kafka cluster on Google Cloud Platform.\n"
+            "You'll configure GCP resources, Kafka settings, networking, and monitoring options.\n\n"
+            "[yellow]Tip:[/yellow] You can save your configuration as a profile for future use."
+        ),
+        title="Welcome",
+        expand=False,
+        border_style="cyan"
+    ))
