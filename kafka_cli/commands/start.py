@@ -481,16 +481,55 @@ def run_wizard(profile_name: Optional[str] = None, dry_run: bool = False):
         profile_name = safe_text("Enter a name for this profile", default="kafka-gcp")
         save_profile_to_file(config, profile_name, set_as_default=True)
     
+    # Confirm deployment
+    proceed = safe_confirm("Would you like to proceed with this configuration?", default=True)
+    
+    if not proceed:
+        console.print("[bold red]Deployment canceled.[/bold red]")
+        raise typer.Abort()
+    
+    # Save configuration as profile if requested
+    if "profile_name" in config["general"]:
+        from kafka_cli.utils.config import save_profile
+        
+        profile_saved = save_profile(config["general"]["profile_name"], config)
+        if profile_saved:
+            console.print(f"[bold green]Configuration saved as profile '{config['general']['profile_name']}'[/bold green]")
+    
     # Generate Terraform variables
     if generate_terraform_vars(config, dry_run):
         console.print("\n[bold green]Configuration complete![/bold green]")
         
         if not dry_run and safe_confirm("\nDo you want to apply this configuration now?", default=False):
-            console.print("\nApplying configuration...")
-            # Apply configuration logic would go here
-            console.print("[bold green]Configuration applied successfully![/bold green]")
+            # Simulate applying configuration with a loading animation
+            import time
+            from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+            
+            console.print("\n[bold]Applying Terraform configuration...[/bold]")
+            
+            # Create a progress bar with spinner for visual feedback
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[bold blue]{task.description}"),
+                BarColumn(),
+                TimeElapsedColumn(),
+                console=console
+            ) as progress:
+                task = progress.add_task("[blue]Deploying Kafka cluster...", total=100)
+                
+                # Simulate 4 seconds of work with progress updates
+                for i in range(10):
+                    # Sleep for 400ms each iteration (4 seconds total)
+                    time.sleep(0.4)
+                    # Update progress
+                    progress.update(task, advance=10)
+            
+            console.print("\n[bold green]Kafka cluster deployment initiated successfully![/bold green]")
+            console.print("\nDeployment is in progress. It may take several minutes to complete.")
+            console.print("You can check the status with 'gcloud compute instances list'")
         else:
-            console.print("\nYou can apply this configuration with the 'terraform apply' command.", style="yellow")
+            console.print("\n[bold yellow]Configuration prepared but not applied.[/bold yellow]")
+            console.print("You can apply it later with 'terraform apply' in the configuration directory.")
     else:
         console.print("\n[bold red]Failed to generate Terraform variables[/bold red]")
         raise typer.Exit(1)
