@@ -341,8 +341,112 @@ def run_wizard(profile_name: Optional[str] = None, dry_run: bool = False):
     # Step 4: Configure GCP settings
     config["gcp"] = configure_gcp()
     
-    # Step 5: Configure Kafka settings
-    config["kafka"] = configure_kafka()
+    # Step 5: Kafka Settings
+    console.print("\n[bold cyan]Step 5:[/bold cyan] [bold]Kafka Cluster Configuration[/bold]")
+    
+    # Cluster name
+    cluster_name = safe_text("Enter a name for your Kafka cluster", default="kafka-cluster")
+    config["kafka"]["cluster_name"] = cluster_name
+    
+    # Kafka version
+    kafka_versions = ["3.5.0", "3.4.1", "3.3.2", "3.2.3", "2.8.1"]
+    kafka_version = safe_select(
+        "Select Kafka version", 
+        choices=kafka_versions, 
+        default="3.5.0"
+    )
+    config["kafka"]["version"] = kafka_version
+    
+    # Cluster size
+    broker_count = safe_number(
+        "Number of Kafka brokers", 
+        min_value=1, 
+        max_value=20, 
+        default=3
+    )
+    config["kafka"]["broker_count"] = broker_count
+    
+    # Instance type selection approach
+    compute_type_approach = safe_select(
+        "How would you like to configure compute resources?",
+        choices=["Select predefined machine type", "Specify custom CPU and memory"],
+        default="Select predefined machine type"
+    )
+    
+    if compute_type_approach == "Select predefined machine type":
+        # Instance type options
+        instance_types = [
+            "e2-standard-2 (2 vCPU, 8GB)",
+            "e2-standard-4 (4 vCPU, 16GB)",
+            "e2-standard-8 (8 vCPU, 32GB)",
+            "n2-standard-2 (2 vCPU, 8GB)",
+            "n2-standard-4 (4 vCPU, 16GB)",
+            "n2-standard-8 (8 vCPU, 32GB)",
+            "n2-standard-16 (16 vCPU, 64GB)",
+            "e2-highmem-2 (2 vCPU, 16GB)",
+            "e2-highmem-4 (4 vCPU, 32GB)",
+            "e2-highcpu-4 (4 vCPU, 4GB)",
+            "e2-highcpu-8 (8 vCPU, 8GB)"
+        ]
+        
+        machine_type_display = safe_select(
+            "Select machine type for Kafka brokers", 
+            choices=instance_types, 
+            default="e2-standard-4 (4 vCPU, 16GB)",
+            help_text="Larger instances provide better performance but cost more."
+        )
+        
+        # Extract the actual machine type from the display string
+        machine_type = machine_type_display.split(" ")[0]
+        config["kafka"]["machine_type"] = machine_type
+        config["kafka"]["custom_machine"] = False
+        
+        console.print(f"[bold green]Selected machine type:[/bold green] {machine_type}")
+        
+    else:
+        # Custom machine type configuration
+        vcpu_count = safe_number(
+            "Number of vCPUs per broker",
+            min_value=1,
+            max_value=96,
+            default=4
+        )
+        
+        memory_gb = safe_number(
+            "Memory (GB) per broker",
+            min_value=1,
+            max_value=624,
+            default=16
+        )
+        
+        # Create a custom machine type name
+        config["kafka"]["custom_machine"] = True
+        config["kafka"]["custom_cpu"] = vcpu_count
+        config["kafka"]["custom_memory_gb"] = memory_gb
+        
+        # Store as e2-custom-{cpu}-{memory} format for Terraform variables
+        custom_machine_type = f"custom-{vcpu_count}-{memory_gb*1024}"
+        config["kafka"]["machine_type"] = custom_machine_type
+        
+        console.print(f"[bold green]Custom machine configuration:[/bold green] {vcpu_count} vCPUs, {memory_gb} GB memory")
+    
+    # Disk configuration
+    disk_types = ["pd-standard", "pd-balanced", "pd-ssd"]
+    disk_type = safe_select(
+        "Select disk type", 
+        choices=disk_types, 
+        default="pd-ssd",
+        help_text="SSD provides better performance, standard is more economical."
+    )
+    config["kafka"]["disk_type"] = disk_type
+    
+    disk_size_gb = safe_number(
+        "Disk size (GB) for each broker", 
+        min_value=10, 
+        max_value=65536, 
+        default=100
+    )
+    config["kafka"]["disk_size_gb"] = disk_size_gb
     
     # Step 6: Configure networking
     config["networking"] = configure_networking(config["gcp"]["region"])
