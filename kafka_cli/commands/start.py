@@ -18,7 +18,8 @@ from kafka_cli.utils.gcp_auth import (
     list_subnets_for_vpc,
     list_security_groups,
     init_terraform_backend,
-    estimate_compute_costs
+    estimate_compute_costs,
+    select_gcp_configuration
 )
 from kafka_cli.utils.interactive import (
     safe_text, 
@@ -238,7 +239,10 @@ def save_profile_to_file(config: Dict[str, Any], profile_name: str, set_as_defau
 
 def run_wizard(profile_name: Optional[str] = None, dry_run: bool = False):
     """Run the interactive Kafka configuration wizard"""
-    from kafka_cli.utils.gcp_auth import check_gcp_auth, get_active_project, list_gcp_regions, get_zones_for_region
+    from kafka_cli.utils.gcp_auth import (
+        check_gcp_auth, get_active_project, list_gcp_regions, get_zones_for_region,
+        select_gcp_configuration
+    )
     from kafka_cli.utils.interactive import (
         safe_text, safe_select, safe_confirm, safe_checkbox, check_interactive_or_exit
     )
@@ -290,14 +294,18 @@ def run_wizard(profile_name: Optional[str] = None, dry_run: bool = False):
         project_id = "mock-project"
         config["gcp"]["project_id"] = project_id
     else:
-        # GCP Project configuration
-        console.print("\n[bold cyan]Step 2:[/bold cyan] [bold]GCP Project Configuration[/bold]")
-        project_id = get_active_project()
+        # Step 2: GCP Configuration Selection
+        console.print("\n[bold cyan]Step 2:[/bold cyan] [bold]GCP Configuration Selection[/bold]")
+        console.print("[grey]Select which GCP configuration to use for this deployment.[/grey]")
+        
+        # Let user select a GCP configuration
+        project_id = select_gcp_configuration()
         
         if not project_id:
-            project_id = safe_text("Enter your GCP Project ID")
+            project_id = safe_text("Enter your GCP Project ID manually", default="my-project")
             
         config["gcp"]["project_id"] = project_id
+        console.print(f"[bold green]Using GCP Project:[/bold green] {project_id}")
     
     # Terraform Backend Setup - will be skipped if not authenticated
     if authenticated:
