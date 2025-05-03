@@ -428,20 +428,8 @@ def run_wizard(profile_name: Optional[str] = None, dry_run: bool = False):  # no
     # Generate Terraform variables
     if generate_terraform_vars(config, dry_run):
         console.print("\n[bold green]Configuration complete![/bold green]")
-
-        if not dry_run and safe_confirm("\nDo you want to apply this configuration now?", default=False):
-            # Use dinosaur game instead of progress bar for a fun deployment experience
-            console.print("\n[bold]Applying Terraform configuration...[/bold]")
-
-            # Run the dinosaur game during deployment (4 seconds)
-            # Show completion message with game score
-            console.print("\n[bold green]Kafka cluster deployment initiated successfully![/bold green]")
-            console.print("[bold blue]Your dinosaur game score: [/bold blue]")
-            console.print("\nDeployment is in progress. It may take several minutes to complete.")
-            console.print("You can check the status with 'gcloud compute instances list'")
-        else:
-            console.print("\n[bold yellow]Configuration prepared but not applied.[/bold yellow]")
-            console.print("You can apply it later with 'terraform apply' in the configuration directory.")
+        console.print("\n[bold yellow]Configuration prepared but not applied.[/bold yellow]")
+        console.print("You can apply it later with 'terraform apply' in the configuration directory.")
     else:
         console.print("\n[bold red]Failed to generate Terraform variables[/bold red]")
         raise typer.Exit(1)
