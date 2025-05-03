@@ -83,9 +83,9 @@ def terraform_apply(
         os.makedirs(terraform_dir, exist_ok=True)
 
         # Check if test.tf exists
-        test_tf_path = os.path.join(terraform_dir, "test.tf")
-        if not os.path.exists(test_tf_path):
-            console.print(f"[bold red]Error:[/bold red] test.tf file not found at {test_tf_path}")
+        # test_tf_path = os.path.join(terraform_dir, "test.tf")
+        if not os.path.exists(terraform_dir):
+            console.print(f"[bold red]Error:[/bold red] .tf files not found at {terraform_dir}")
             console.print("Create a test.tf file in the terraform directory first.")
             return
 
@@ -154,13 +154,9 @@ def terraform_apply(
         console.print("Applying test.tf configuration...")
 
         # Construct apply command with auto-approve if specified
-        apply_cmd = ["terraform", "apply"]
+        apply_cmd = ["terraform", f"-chdir={terraform_dir}", "apply"]
         if auto_approve:
             apply_cmd.append("-auto-approve")
-
-        # Specify test.tf file explicitly
-        apply_cmd.extend(["-target", test_tf_path])
-
         try:
             # Run the apply command and stream output to console
             process = subprocess.Popen(

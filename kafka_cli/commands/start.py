@@ -237,7 +237,7 @@ def run_wizard(profile_name: Optional[str] = None, dry_run: bool = False):  # no
 
     # Optional profile name
     if not profile_name:
-        use_profile = safe_confirm("Would you like to save this configuration as a named profile?", default=True)
+        use_profile = True
         if use_profile:
             profile_name = safe_text("Enter a name for this profile", default="default")
             config["general"]["profile_name"] = profile_name
@@ -429,6 +429,7 @@ def run_wizard(profile_name: Optional[str] = None, dry_run: bool = False):  # no
     if generate_terraform_vars(config, dry_run):
         console.print("\n[bold green]Configuration complete![/bold green]")
         console.print("\n[bold yellow]Configuration prepared but not applied.[/bold yellow]")
+
         console.print("You can apply it later with 'terraform apply' in the configuration directory.")
     else:
         console.print("\n[bold red]Failed to generate Terraform variables[/bold red]")
@@ -631,7 +632,7 @@ def configure_monitoring() -> Dict[str, Any]:
         monitoring_config["ops_agent"] = safe_confirm("Install Ops agent?", default=True)
 
         # Export to Grafana
-        monitoring_config["grafana_export"] = safe_confirm("Export Grafana dashboards?", default=False)
+        monitoring_config["grafana_export"] = safe_confirm("Export Grafana dashboards[Y/n]?", default=False)
 
         if monitoring_config["grafana_export"]:
             monitoring_config["grafana_host"] = safe_text("Enter Grafana host URL:", default="")
