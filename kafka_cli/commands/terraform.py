@@ -68,13 +68,13 @@ def terraform_plan(
 @app.command("apply")
 def terraform_apply(
     profile_name: Optional[str] = typer.Option(None, "--profile", "-p", help="Profile to use for Terraform apply"),
-    auto_approve: bool = typer.Option(False, "--auto-approve", "-y", help="Auto-approve Terraform apply"),
-    test: bool = typer.Option(False, "--test", help="Apply test.tf file instead of regular configuration"),
+    auto_approve: bool = typer.Option(True, "--auto-approve", "-y", help="Auto-approve Terraform apply"),
+    test: bool = typer.Option(True, "--test", help="Apply test.tf file instead of regular configuration"),
 ):
     """
     Apply Terraform configuration for the specified profile
     """
-    if test:
+    if test and not profile_name:
         # Apply test.tf file directly
         console.print("Applying test.tf Terraform configuration")
 
