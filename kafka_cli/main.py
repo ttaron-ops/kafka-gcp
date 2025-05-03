@@ -7,10 +7,10 @@ import typer
 from rich.console import Console
 
 from kafka_cli.commands import (
-    start,
-    profiles,
-    health,
     addons,
+    health,
+    profiles,
+    start,
     terraform,
 )
 from kafka_cli.utils.config import init_config_dir
@@ -36,9 +36,7 @@ app.add_typer(terraform.app, name="terraform")
 @app.callback()
 def main(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose output"),
-    config_dir: Optional[str] = typer.Option(
-        None, "--config-dir", help="Custom configuration directory"
-    ),
+    config_dir: Optional[str] = typer.Option(None, "--config-dir", help="Custom configuration directory"),
 ):
     """
     Main entry point for the Kafka CLI
@@ -55,19 +53,21 @@ def main(
 def version():
     """Show the current version of the CLI tool"""
     from importlib.metadata import version as get_version
+
     try:
         ver = get_version("kafka-cli")
         console.print(f"Kafka CLI version: {ver}")
-    except:
+    except Exception as e:
         console.print("Kafka CLI version: 0.1.0")
+        console.print(f"Error: {e}")
 
 
 if __name__ == "__main__":
     # Handle questionary/prompt_toolkit in non-interactive environments
-    if not is_interactive() and any(cmd in sys.argv for cmd in ['start']):
+    if not is_interactive() and any(cmd in sys.argv for cmd in ["start"]):
         console.print("[bold red]Error:[/bold red] This command requires an interactive terminal.")
         console.print("Please run this command in a terminal where you can provide input.")
         console.print("\nFor automation purposes, consider using command-line options instead of the interactive wizard.")
         sys.exit(1)
-        
+
     app()
