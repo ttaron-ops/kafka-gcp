@@ -2,83 +2,135 @@ import json
 import os
 import shutil
 import subprocess
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union, cast
 
 from rich.console import Console
+
+from kafka_cli.core.errors import AuthenticationError, CommandError, ConfigurationError, ErrorHandler, ErrorSeverity
 
 console = Console()
 
 
 def is_gcloud_installed() -> bool:
-    """Check if gcloud CLI is installed and available in PATH"""
+    """
+    Check if gcloud CLI is installed and available in PATH
+
+    Returns:
+        bool: True if gcloud is installed, False otherwise
+    """
     return shutil.which("gcloud") is not None
 
 
 def check_gcp_auth() -> bool:
-    """Check if user is authenticated with GCP"""
+    """
+    Check if user is authenticated with GCP
+
+    Returns:
+        bool: True if authenticated, False otherwise
+
+    Raises:
+        AuthenticationError: If there's an issue with GCP authentication
+    """
     try:
         if not is_gcloud_installed():
-            console.print("[bold red]Error:[/bold red] Google Cloud SDK (gcloud) is not installed or not in your PATH.")
-            console.print("Please install the Google Cloud SDK from: [link]https://cloud.google.com/sdk/docs/install[/link]")
-            return False
+            raise AuthenticationError(
+                "Google Cloud SDK (gcloud) is not installed or not in your PATH",
+                help_text="Please install the Google Cloud SDK from: https://cloud.google.com/sdk/docs/install",
+            )
 
         result = subprocess.run(["gcloud", "auth", "list", "--format", "json"], capture_output=True, text=True, check=True)
 
         auth_list = json.loads(result.stdout)
         if not auth_list:
-            console.print("[bold red]No active GCP authentication found.[/bold red]")
-            console.print("Please run [bold]gcloud auth login[/bold] to authenticate.")
-            return False
+            raise AuthenticationError(
+                "No active GCP authentication found", help_text="Please run 'gcloud auth login' to authenticate"
+            )
 
         active_account = next((acc for acc in auth_list if acc.get("status") == "ACTIVE"), None)
         if active_account:
             console.print(f"[bold green]Authenticated as:[/bold green] {active_account.get('account')}")
             return True
         else:
-            console.print("[bold red]No active GCP authentication found.[/bold red]")
-            console.print("Please run [bold]gcloud auth login[/bold] to authenticate.")
-            return False
+            raise AuthenticationError(
+                "No active GCP authentication found", help_text="Please run 'gcloud auth login' to authenticate"
+            )
 
     except subprocess.CalledProcessError as e:
-        console.print(f"[bold red]Error checking GCP authentication:[/bold red] {str(e)}")
-        console.print("Please ensure gcloud CLI is installed and properly configured.")
+        error_msg = f"Error checking GCP authentication: {str(e)}"
+        ErrorHandler().handle_exception(
+            AuthenticationError(error_msg, help_text="Please ensure gcloud CLI is installed and properly configured")
+        )
         return False
+    except json.JSONDecodeError as e:
+        error_msg = f"Invalid response from gcloud: {str(e)}"
+        ErrorHandler().handle_exception(AuthenticationError(error_msg))
+        return False
+    except AuthenticationError:
+        # Just re-raise authentication errors to be handled by caller
+        raise
     except Exception as e:
-        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        error_msg = f"Unexpected error during authentication check: {str(e)}"
+        ErrorHandler().handle_exception(AuthenticationError(error_msg))
         return False
 
 
 def get_active_project() -> Optional[str]:
-    """Get the currently active GCP project"""
+    """
+    Get the currently active GCP project
+
+    Returns:
+        Optional[str]: Project ID if available, None otherwise
+
+    Raises:
+        ConfigurationError: If there's an issue getting the project info
+    """
     try:
         if not is_gcloud_installed():
-            console.print("[bold yellow]Cannot determine active GCP project:[/bold yellow] Google Cloud SDK not installed.")
+            error_msg = "Cannot determine active GCP project: Google Cloud SDK not installed"
+            ErrorHandler().handle_exception(ConfigurationError(error_msg, severity=ErrorSeverity.WARNING))
             return None
 
         result = subprocess.run(["gcloud", "config", "get-value", "project"], capture_output=True, text=True, check=True)
 
         project_id = result.stdout.strip()
         if not project_id:
-            console.print("[bold yellow]No active GCP project set.[/bold yellow]")
-            console.print("Please run [bold]gcloud config set project PROJECT_ID[/bold] to set a project.")
+            error_msg = "No active GCP project set"
+            ErrorHandler().handle_exception(
+                ConfigurationError(
+                    error_msg,
+                    severity=ErrorSeverity.WARNING,
+                    help_text="Please run 'gcloud config set project PROJECT_ID' to set a project",
+                )
+            )
             return None
 
         console.print(f"[bold green]Active GCP project:[/bold green] {project_id}")
         return project_id
 
     except subprocess.CalledProcessError as e:
-        console.print(f"[bold red]Error getting active GCP project:[/bold red] {str(e)}")
+        error_msg = f"Error getting active GCP project: {str(e)}"
+        ErrorHandler().handle_exception(ConfigurationError(error_msg))
         return None
+    except ConfigurationError:
+        # Just re-raise configuration errors to be handled by caller
+        raise
     except Exception as e:
-        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        error_msg = f"Unexpected error getting GCP project: {str(e)}"
+        ErrorHandler().handle_exception(ConfigurationError(error_msg))
         return None
 
 
-def list_gcp_configurations() -> List[Dict]:
-    """List all available GCP configurations and mark the active one"""
+def list_gcp_configurations() -> List[Dict[str, Any]]:
+    """
+    List all available GCP configurations and mark the active one
+
+    Returns:
+        List[Dict[str, Any]]: List of GCP configurations, each as a dictionary
+    """
     try:
         if not is_gcloud_installed():
-            console.print("[bold yellow]Cannot list GCP configurations:[/bold yellow] Google Cloud SDK not installed.")
+            error_msg = "Cannot list GCP configurations: Google Cloud SDK not installed"
+            ErrorHandler().handle_exception(ConfigurationError(error_msg, severity=ErrorSeverity.WARNING))
             return []
 
         result = subprocess.run(
@@ -86,21 +138,36 @@ def list_gcp_configurations() -> List[Dict]:
         )
 
         configurations = json.loads(result.stdout)
-        return configurations
+        return cast(List[Dict[str, Any]], configurations)
 
     except subprocess.CalledProcessError as e:
-        console.print(f"[bold red]Error listing GCP configurations:[/bold red] {str(e)}")
+        error_msg = f"Error listing GCP configurations: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg, command="gcloud config configurations list"))
+        return []
+    except json.JSONDecodeError as e:
+        error_msg = f"Invalid response from gcloud: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg))
         return []
     except Exception as e:
-        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        error_msg = f"Unexpected error listing GCP configurations: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg))
         return []
 
 
 def activate_gcp_configuration(config_name: str) -> bool:
-    """Activate a specific GCP configuration"""
+    """
+    Activate a specific GCP configuration
+
+    Args:
+        config_name: Name of the configuration to activate
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
     try:
         if not is_gcloud_installed():
-            console.print("[bold yellow]Cannot activate GCP configuration:[/bold yellow] Google Cloud SDK not installed.")
+            error_msg = "Cannot activate GCP configuration: Google Cloud SDK not installed"
+            ErrorHandler().handle_exception(ConfigurationError(error_msg, severity=ErrorSeverity.WARNING))
             return False
 
         subprocess.run(["gcloud", "config", "configurations", "activate", config_name], capture_output=True, text=True, check=True)
@@ -109,38 +176,47 @@ def activate_gcp_configuration(config_name: str) -> bool:
         return True
 
     except subprocess.CalledProcessError as e:
-        console.print(f"[bold red]Error activating GCP configuration:[/bold red] {str(e)}")
+        error_msg = f"Error activating GCP configuration: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg, command=f"gcloud config configurations activate {config_name}"))
         return False
     except Exception as e:
-        console.print(f"[bold red]Error:[/bold red] {str(e)}")
+        error_msg = f"Unexpected error activating GCP configuration: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg))
         return False
 
 
 def select_gcp_configuration() -> Optional[str]:
     """
     Display available GCP configurations and let the user select one.
-    Returns the project ID of the selected configuration.
+
+    Returns:
+        Optional[str]: Project ID of the selected configuration, or None if selection failed
     """
     from kafka_cli.utils.interactive import safe_select
 
     try:
         if not is_gcloud_installed():
-            console.print("[bold yellow]Cannot select GCP configuration:[/bold yellow] Google Cloud SDK not installed.")
+            error_msg = "Cannot select GCP configuration: Google Cloud SDK not installed"
+            ErrorHandler().handle_exception(ConfigurationError(error_msg, severity=ErrorSeverity.WARNING))
             return None
 
         # Get all available configurations
         configurations = list_gcp_configurations()
         if not configurations:
-            console.print("[bold yellow]No GCP configurations found.[/bold yellow]")
-            console.print("Please run [bold]gcloud init[/bold] to set up a configuration.")
+            error_msg = "No GCP configurations found"
+            ErrorHandler().handle_exception(
+                ConfigurationError(
+                    error_msg, severity=ErrorSeverity.WARNING, help_text="Please run 'gcloud init' to set up a configuration"
+                )
+            )
             return None
 
         # Mark active configuration and build selection list
         active_config = next((c for c in configurations if c.get("is_active", False)), None)
 
         # Build options list
-        options = []
-        config_mapping = {}
+        options: List[str] = []
+        config_mapping: Dict[str, Dict[str, Any]] = {}
 
         for config in configurations:
             name = config.get("name", "")
@@ -184,14 +260,21 @@ def select_gcp_configuration() -> Optional[str]:
         return selected_config.get("properties", {}).get("core", {}).get("project", "")
 
     except Exception as e:
-        console.print(f"[bold red]Error selecting GCP configuration:[/bold red] {str(e)}")
+        error_msg = f"Error selecting GCP configuration: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg))
         return None
 
 
 def list_gcp_regions() -> List[str]:
-    """Get list of available GCP regions"""
+    """
+    Get list of available GCP regions
+
+    Returns:
+        List[str]: List of GCP region names
+    """
     if not is_gcloud_installed():
-        console.print("[bold yellow]Using default regions list:[/bold yellow] Google Cloud SDK not installed.")
+        error_msg = "Using default regions list: Google Cloud SDK not installed"
+        ErrorHandler().handle_exception(ConfigurationError(error_msg, severity=ErrorSeverity.WARNING))
         # Return common regions as fallback
         return ["us-central1", "us-east1", "us-west1", "europe-west1", "asia-east1"]
 
@@ -201,20 +284,37 @@ def list_gcp_regions() -> List[str]:
         )
 
         regions_data = json.loads(result.stdout)
-        return [region["name"] for region in regions_data]
+        return [region.get("name") for region in regions_data if region.get("name")]
 
+    except subprocess.CalledProcessError as e:
+        error_msg = f"Error listing GCP regions: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg, command="gcloud compute regions list"))
+        # Return common regions as fallback
+        return ["us-central1", "us-east1", "us-west1", "europe-west1", "asia-east1"]
+    except json.JSONDecodeError:
+        error_msg = "Invalid response from gcloud while listing regions"
+        ErrorHandler().handle_exception(CommandError(error_msg))
+        return ["us-central1", "us-east1", "us-west1", "europe-west1", "asia-east1"]
     except Exception as e:
-        console.print(f"[bold yellow]Error fetching GCP regions:[/bold yellow] {str(e)}")
-        console.print("[bold yellow]Using default regions list.[/bold yellow]")
-        # Return some common regions as fallback
+        error_msg = f"Unexpected error listing GCP regions: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg))
         return ["us-central1", "us-east1", "us-west1", "europe-west1", "asia-east1"]
 
 
 def get_zones_for_region(region: str) -> List[str]:
-    """Get availability zones for a specific GCP region"""
+    """
+    Get availability zones for a specific GCP region
+
+    Args:
+        region: GCP region name
+
+    Returns:
+        List[str]: List of zone names
+    """
     if not is_gcloud_installed():
-        console.print("[bold yellow]Using default zones:[/bold yellow] Google Cloud SDK not installed.")
-        # Return default zones as fallback
+        error_msg = f"Using default zones for region {region}: Google Cloud SDK not installed"
+        ErrorHandler().handle_exception(ConfigurationError(error_msg, severity=ErrorSeverity.WARNING))
+        # Return common zones for the region as fallback
         return [f"{region}-a", f"{region}-b", f"{region}-c"]
 
     try:
@@ -226,19 +326,32 @@ def get_zones_for_region(region: str) -> List[str]:
         )
 
         zones_data = json.loads(result.stdout)
-        return [zone["name"] for zone in zones_data]
+        return [zone.get("name") for zone in zones_data if zone.get("name")]
 
+    except subprocess.CalledProcessError as e:
+        error_msg = f"Error listing zones for region {region}: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg, command=f"gcloud compute zones list --filter region:{region}"))
+        return [f"{region}-a", f"{region}-b", f"{region}-c"]
+    except json.JSONDecodeError:
+        error_msg = f"Invalid response from gcloud while listing zones for region {region}"
+        ErrorHandler().handle_exception(CommandError(error_msg))
+        return [f"{region}-a", f"{region}-b", f"{region}-c"]
     except Exception as e:
-        console.print(f"[bold yellow]Error fetching zones for region {region}:[/bold yellow] {str(e)}")
-        console.print("[bold yellow]Using default zones.[/bold yellow]")
-        # Return default zones as fallback
+        error_msg = f"Unexpected error listing zones for region {region}: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg))
         return [f"{region}-a", f"{region}-b", f"{region}-c"]
 
 
-def list_gcp_vpcs() -> List[Dict]:
-    """Get list of VPC networks in the project"""
+def list_gcp_vpcs() -> List[Dict[str, Any]]:
+    """
+    Get list of VPC networks in the project
+
+    Returns:
+        List[Dict[str, Any]]: List of VPC networks
+    """
     if not is_gcloud_installed():
-        console.print("[bold yellow]Cannot fetch VPC networks:[/bold yellow] Google Cloud SDK not installed.")
+        error_msg = "Cannot list VPC networks: Google Cloud SDK not installed"
+        ErrorHandler().handle_exception(ConfigurationError(error_msg, severity=ErrorSeverity.WARNING))
         return []
 
     try:
@@ -246,18 +359,36 @@ def list_gcp_vpcs() -> List[Dict]:
             ["gcloud", "compute", "networks", "list", "--format", "json"], capture_output=True, text=True, check=True
         )
 
-        networks = json.loads(result.stdout)
-        return networks
+        vpc_data = json.loads(result.stdout)
+        return cast(List[Dict[str, Any]], vpc_data)
 
+    except subprocess.CalledProcessError as e:
+        error_msg = f"Error listing VPC networks: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg, command="gcloud compute networks list"))
+        return []
+    except json.JSONDecodeError:
+        error_msg = "Invalid response from gcloud while listing VPC networks"
+        ErrorHandler().handle_exception(CommandError(error_msg))
+        return []
     except Exception as e:
-        console.print(f"[bold yellow]Error fetching VPC networks:[/bold yellow] {str(e)}")
+        error_msg = f"Unexpected error listing VPC networks: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg))
         return []
 
 
-def list_subnets_for_vpc(vpc_name: str) -> List[Dict]:
-    """Get list of subnets for a specific VPC"""
+def list_subnets_for_vpc(vpc_name: str) -> List[Dict[str, Any]]:
+    """
+    Get list of subnets for a specific VPC
+
+    Args:
+        vpc_name: Name of the VPC network
+
+    Returns:
+        List[Dict[str, Any]]: List of subnets
+    """
     if not is_gcloud_installed():
-        console.print("[bold yellow]Cannot fetch subnets:[/bold yellow] Google Cloud SDK not installed.")
+        error_msg = f"Cannot list subnets for VPC {vpc_name}: Google Cloud SDK not installed"
+        ErrorHandler().handle_exception(ConfigurationError(error_msg, severity=ErrorSeverity.WARNING))
         return []
 
     try:
@@ -268,18 +399,35 @@ def list_subnets_for_vpc(vpc_name: str) -> List[Dict]:
             check=True,
         )
 
-        subnets = json.loads(result.stdout)
-        return subnets
+        subnet_data = json.loads(result.stdout)
+        return cast(List[Dict[str, Any]], subnet_data)
 
+    except subprocess.CalledProcessError as e:
+        error_msg = f"Error listing subnets for VPC {vpc_name}: {str(e)}"
+        ErrorHandler().handle_exception(
+            CommandError(error_msg, command=f"gcloud compute networks subnets list --filter network:{vpc_name}")
+        )
+        return []
+    except json.JSONDecodeError:
+        error_msg = f"Invalid response from gcloud while listing subnets for VPC {vpc_name}"
+        ErrorHandler().handle_exception(CommandError(error_msg))
+        return []
     except Exception as e:
-        console.print(f"[bold yellow]Error fetching subnets for VPC {vpc_name}:[/bold yellow] {str(e)}")
+        error_msg = f"Unexpected error listing subnets for VPC {vpc_name}: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg))
         return []
 
 
-def list_security_groups() -> List[Dict]:
-    """Get list of firewall rules (equivalent to security groups)"""
+def list_security_groups() -> List[Dict[str, Any]]:
+    """
+    Get list of firewall rules (equivalent to security groups)
+
+    Returns:
+        List[Dict[str, Any]]: List of firewall rules
+    """
     if not is_gcloud_installed():
-        console.print("[bold yellow]Cannot fetch firewall rules:[/bold yellow] Google Cloud SDK not installed.")
+        error_msg = "Cannot list firewall rules: Google Cloud SDK not installed"
+        ErrorHandler().handle_exception(ConfigurationError(error_msg, severity=ErrorSeverity.WARNING))
         return []
 
     try:
@@ -287,113 +435,176 @@ def list_security_groups() -> List[Dict]:
             ["gcloud", "compute", "firewall-rules", "list", "--format", "json"], capture_output=True, text=True, check=True
         )
 
-        firewall_rules = json.loads(result.stdout)
-        return firewall_rules
+        firewall_data = json.loads(result.stdout)
+        return cast(List[Dict[str, Any]], firewall_data)
 
+    except subprocess.CalledProcessError as e:
+        error_msg = f"Error listing firewall rules: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg, command="gcloud compute firewall-rules list"))
+        return []
+    except json.JSONDecodeError:
+        error_msg = "Invalid response from gcloud while listing firewall rules"
+        ErrorHandler().handle_exception(CommandError(error_msg))
+        return []
     except Exception as e:
-        console.print(f"[bold yellow]Error fetching firewall rules:[/bold yellow] {str(e)}")
+        error_msg = f"Unexpected error listing firewall rules: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg))
         return []
 
 
 def init_terraform_backend(bucket_name: str, prefix: str) -> bool:
-    """Initialize Terraform backend with GCS bucket"""
+    """
+    Initialize Terraform backend with GCS bucket
+
+    Args:
+        bucket_name: Name of the GCS bucket to use
+        prefix: Prefix within the bucket for storing state
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    if not is_gcloud_installed():
+        error_msg = "Cannot initialize Terraform backend: Google Cloud SDK not installed"
+        ErrorHandler().handle_exception(
+            ConfigurationError(error_msg, severity=ErrorSeverity.ERROR, help_text="Please install the Google Cloud SDK")
+        )
+        return False
+
     try:
-        # Check if terraform is installed
-        if not shutil.which("terraform"):
-            console.print("[bold red]Error:[/bold red] Terraform is not installed or not in your PATH.")
-            console.print("Please install Terraform from: [link]https://www.terraform.io/downloads[/link]")
-            return False
+        # Check if bucket exists
+        check_result = subprocess.run(["gsutil", "ls", f"gs://{bucket_name}"], capture_output=True, text=True)
 
-        # Create backend.tf file with GCS configuration
-        backend_config = f"""terraform {{
-  backend "gcs" {{
-    bucket = "{bucket_name}"
-    prefix = "{prefix}"
-  }}
-}}
-"""
+        # Create bucket if it doesn't exist
+        if check_result.returncode != 0:
+            console.print(f"Creating GCS bucket for Terraform state: [cyan]{bucket_name}[/cyan]")
+            subprocess.run(["gsutil", "mb", f"gs://{bucket_name}"], capture_output=True, text=True, check=True)
 
-        # Get Terraform directory path
-        from kafka_cli.utils.config import get_config_dir
+            # Enable versioning on the bucket
+            console.print("Enabling versioning on the bucket...")
+            subprocess.run(["gsutil", "versioning", "set", "on", f"gs://{bucket_name}"], capture_output=True, text=True, check=True)
 
-        terraform_dir = os.path.join(get_config_dir(), "terraform")
+        # Generate backend configuration
+        backend_config = {"terraform": {"backend": {"gcs": {"bucket": bucket_name, "prefix": prefix}}}}
+
+        # Get terraform directory
+        terraform_dir = os.path.join(os.path.expanduser("~/.kafka-cli"), "terraform")
         os.makedirs(terraform_dir, exist_ok=True)
 
         # Write backend configuration
-        backend_file = os.path.join(terraform_dir, "backend.tf")
+        backend_file = os.path.join(terraform_dir, "backend.tf.json")
         with open(backend_file, "w") as f:
-            f.write(backend_config)
+            json.dump(backend_config, f, indent=2)
 
-        # Run terraform init
-        console.print(f"[bold]Initializing Terraform backend with bucket [cyan]{bucket_name}[/cyan]...[/bold]")
-        result = subprocess.run(["terraform", "init"], cwd=terraform_dir, capture_output=True, text=True)
-
-        if result.returncode != 0:
-            console.print("[bold red]Terraform initialization failed:[/bold red]")
-            console.print(result.stderr)
-            return False
-
-        console.print("[bold green]Terraform backend initialized successfully![/bold green]")
+        console.print(f"Terraform backend configuration written to: [cyan]{backend_file}[/cyan]")
         return True
 
+    except subprocess.CalledProcessError as e:
+        error_msg = f"Error initializing Terraform backend: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg, command="gsutil operations"))
+        return False
     except Exception as e:
-        console.print(f"[bold red]Error initializing Terraform backend:[/bold red] {str(e)}")
+        error_msg = f"Unexpected error initializing Terraform backend: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg))
         return False
 
 
-def estimate_compute_costs(region: str, instance_type: str, num_instances: int, disk_type: str, disk_size_gb: int) -> Optional[Dict]:
+def estimate_compute_costs(region: str, instance_type: str, num_instances: int, disk_type: str, disk_size_gb: int) -> Dict[str, Any]:
     """
-    Estimate GCP compute costs for the configured cluster
-    This is a simplified estimation and actual costs may vary
+    Estimate GCP compute costs for the configured cluster.
+    This is a simplified estimation and actual costs may vary.
+
+    Args:
+        region: GCP region name
+        instance_type: GCP machine type
+        num_instances: Number of instances
+        disk_type: Disk type (pd-standard, pd-ssd)
+        disk_size_gb: Disk size in GB
+
+    Returns:
+        Dict[str, Any]: Dictionary with cost estimates
     """
-    # Basic rate mapping (very simplified)
-    region_multipliers = {
-        "us-central1": 1.0,
-        "us-east1": 1.0,
-        "us-west1": 1.05,
-        "europe-west1": 1.1,
-        "asia-east1": 1.15,
-    }
-
-    instance_costs = {
-        "e2-small": 0.02,
-        "e2-medium": 0.03,
-        "e2-standard-2": 0.07,
-        "e2-standard-4": 0.14,
-        "e2-standard-8": 0.28,
-        "n2-standard-2": 0.10,
-        "n2-standard-4": 0.20,
-        "n2-standard-8": 0.40,
-    }
-
-    disk_costs = {
-        "pd-standard": 0.04,
-        "pd-balanced": 0.10,
-        "pd-ssd": 0.17,
-    }
-
-    region_factor = region_multipliers.get(region, 1.1)  # Default if unknown
-
     try:
-        # Calculate costs
-        instance_hourly = instance_costs.get(instance_type, 0.10) * region_factor
-        instance_monthly = instance_hourly * 24 * 30
-
-        disk_monthly_per_gb = disk_costs.get(disk_type, 0.10) * region_factor
-        disk_monthly = disk_monthly_per_gb * disk_size_gb
-
-        # Total costs
-        instance_total = instance_monthly * num_instances
-        disk_total = disk_monthly * num_instances
-        monthly_total = instance_total + disk_total
-
-        return {
-            "instance_hourly": round(instance_hourly, 3),
-            "instance_monthly_per_node": round(instance_monthly, 2),
-            "disk_monthly_per_node": round(disk_monthly, 2),
-            "total_monthly": round(monthly_total, 2),
+        # Simplified cost estimates (placeholder - would be better to use actual GCP pricing API)
+        # These are very rough approximations
+        costs: Dict[str, Union[float, Dict[str, Any]]] = {
+            "compute": 0.0,
+            "storage": 0.0,
+            "network": 0.0,
+            "total": 0.0,
+            "breakdown": {"hourly": {}, "monthly": {}, "yearly": {}},
         }
 
+        # Rough compute costs by machine type (per hour)
+        compute_costs = {
+            "e2-standard-2": 0.07,
+            "e2-standard-4": 0.14,
+            "e2-standard-8": 0.28,
+            "e2-highmem-2": 0.09,
+            "e2-highmem-4": 0.19,
+            "e2-highcpu-2": 0.05,
+            "e2-highcpu-4": 0.10,
+            "n2-standard-2": 0.10,
+            "n2-standard-4": 0.19,
+            "n2-standard-8": 0.38,
+        }
+
+        # Rough disk costs by type (per GB per month)
+        disk_costs = {
+            "pd-standard": 0.04,
+            "pd-ssd": 0.17,
+            "pd-balanced": 0.10,
+        }
+
+        # Calculate compute cost per hour
+        compute_cost_per_hour = compute_costs.get(instance_type, 0.10) * num_instances
+        compute_cost_per_month = compute_cost_per_hour * 24 * 30
+
+        # Calculate disk cost per month
+        disk_cost_per_month = disk_costs.get(disk_type, 0.04) * disk_size_gb * num_instances
+
+        # Calculate network cost (very simplified estimate)
+        network_cost_per_month = 0.10 * num_instances * 30
+
+        # Total monthly cost
+        total_cost_per_month = compute_cost_per_month + disk_cost_per_month + network_cost_per_month
+        total_cost_per_year = total_cost_per_month * 12
+
+        # Update costs dictionary
+        costs["compute"] = compute_cost_per_month
+        costs["storage"] = disk_cost_per_month
+        costs["network"] = network_cost_per_month
+        costs["total"] = total_cost_per_month
+
+        # Add breakdowns
+        costs["breakdown"] = {
+            "hourly": {
+                "compute": compute_cost_per_hour,
+                "total": compute_cost_per_hour + (disk_cost_per_month + network_cost_per_month) / (24 * 30),
+            },
+            "monthly": {
+                "compute": compute_cost_per_month,
+                "storage": disk_cost_per_month,
+                "network": network_cost_per_month,
+                "total": total_cost_per_month,
+            },
+            "yearly": {
+                "compute": compute_cost_per_month * 12,
+                "storage": disk_cost_per_month * 12,
+                "network": network_cost_per_month * 12,
+                "total": total_cost_per_year,
+            },
+        }
+
+        console.print("\n[bold]Estimated GCP Costs (USD)[/bold]")
+        console.print(f"Region: {region}, Instance Type: {instance_type}, Count: {num_instances}")
+        console.print(f"Disk: {disk_type}, Size: {disk_size_gb}GB per instance")
+        console.print(f"[bold]Monthly Estimate:[/bold] ${total_cost_per_month:.2f}")
+        console.print(f"[bold]Yearly Estimate:[/bold] ${total_cost_per_year:.2f}")
+        console.print("[yellow]Note:[/yellow] This is a simplified estimation. Actual costs may vary.")
+
+        return cast(Dict[str, Any], costs)
+
     except Exception as e:
-        console.print(f"[bold red]Error estimating costs:[/bold red] {str(e)}")
-        return None
+        error_msg = f"Error estimating compute costs: {str(e)}"
+        ErrorHandler().handle_exception(CommandError(error_msg))
+        return {"compute": 0.0, "storage": 0.0, "network": 0.0, "total": 0.0, "error": str(e)}

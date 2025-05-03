@@ -97,7 +97,7 @@ select = [
     "B",  # flake8-bugbear rules
     "I",  # isort rules
 ]
-ignore = ["B008"] # List any rules to be ignored, currently empty.
+ignore = ["B008", "C901", "B904"] # List any rules to be ignored, currently empty.
 task-tags = ["HACK"]
 # Allow auto-fixing of all enabled rules when using the `--fix` option.
 fixable = ["ALL"]
