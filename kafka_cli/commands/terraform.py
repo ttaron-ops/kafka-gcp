@@ -68,13 +68,13 @@ def terraform_plan(
 @app.command("apply")
 def terraform_apply(
     profile_name: Optional[str] = typer.Option(None, "--profile", "-p", help="Profile to use for Terraform apply"),
-    auto_approve: bool = typer.Option(True, "--auto-approve", "-y", help="Auto-approve Terraform apply"),
-    test: bool = typer.Option(True, "--test", help="Apply test.tf file instead of regular configuration"),
+    auto_approve: bool = typer.Option(False, "--auto-approve", "-y", help="Auto-approve Terraform apply"),
+    test: bool = typer.Option(False, "--test", help="Apply test.tf file instead of regular configuration"),
 ):
     """
     Apply Terraform configuration for the specified profile
     """
-    if test and not profile_name:
+    if test:
         # Apply test.tf file directly
         console.print("Applying test.tf Terraform configuration")
 
@@ -83,9 +83,9 @@ def terraform_apply(
         os.makedirs(terraform_dir, exist_ok=True)
 
         # Check if test.tf exists
-        # test_tf_path = os.path.join(terraform_dir, "test.tf")
-        if not os.path.exists(terraform_dir):
-            console.print(f"[bold red]Error:[/bold red] .tf files not found at {terraform_dir}")
+        test_tf_path = os.path.join(terraform_dir, "test.tf")
+        if not os.path.exists(test_tf_path):
+            console.print(f"[bold red]Error:[/bold red] test.tf file not found at {test_tf_path}")
             console.print("Create a test.tf file in the terraform directory first.")
             return
 
@@ -111,7 +111,7 @@ def terraform_apply(
             task = progress.add_task("[cyan]Initializing...", total=100)
 
             # Update the progress bar over 60 seconds
-            for i in range(100):
+            for i in range(10):
                 # Sleep for 0.6 seconds (60 seconds total / 100 steps)
                 time.sleep(0.6)
                 # Update the progress description periodically
@@ -154,9 +154,12 @@ def terraform_apply(
         console.print("Applying test.tf configuration...")
 
         # Construct apply command with auto-approve if specified
-        apply_cmd = ["terraform", f"-chdir={terraform_dir}", "apply"]
+        apply_cmd = ["terraform", "-chdir=/Users/taronhovsepyan/.kafka-cli/infra", "apply"]
         if auto_approve:
             apply_cmd.append("-auto-approve")
+
+        apply_cmd.extend([])
+
         try:
             # Run the apply command and stream output to console
             process = subprocess.Popen(
