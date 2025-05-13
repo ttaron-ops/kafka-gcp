@@ -21,19 +21,19 @@ _config_dir: str = DEFAULT_CONFIG_DIR
 def init_config_dir(custom_config_dir: Optional[str] = None) -> str:
     """Initialize the configuration directory structure."""
     global _config_dir
-    
+
     if custom_config_dir:
         _config_dir = os.path.expanduser(custom_config_dir)
     else:
         _config_dir = DEFAULT_CONFIG_DIR
-    
+
     # Create main config directory if it doesn't exist
     pathlib.Path(_config_dir).mkdir(parents=True, exist_ok=True)
-    
+
     # Create profile and terraform directories
     pathlib.Path(os.path.join(_config_dir, PROFILES_DIR)).mkdir(exist_ok=True)
     pathlib.Path(os.path.join(_config_dir, TERRAFORM_DIR)).mkdir(exist_ok=True)
-    
+
     # Create default config file if it doesn't exist
     config_path = os.path.join(_config_dir, CONFIG_FILE)
     if not os.path.exists(config_path):
@@ -52,7 +52,7 @@ def init_config_dir(custom_config_dir: Optional[str] = None) -> str:
                 },
             }, f, default_flow_style=False)
         console.print(f"Created default configuration at [cyan]{config_path}[/cyan]")
-    
+
     load_config()
     return _config_dir
 
@@ -60,7 +60,7 @@ def init_config_dir(custom_config_dir: Optional[str] = None) -> str:
 def load_config() -> Dict[str, Any]:
     """Load the configuration from the config file."""
     global _config
-    
+
     config_path = os.path.join(_config_dir, CONFIG_FILE)
     try:
         with open(config_path, 'r') as f:

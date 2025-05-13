@@ -8,7 +8,7 @@ terraform {
   required_version = ">= 1.3.0"
 
   backend "gcs" {
-    bucket = "kafka-terraform-state"
-    prefix = "terraform/state"
+    bucket = var.terraform_state_bucket
+    prefix = var.terraform_state_prefix
   }
 }

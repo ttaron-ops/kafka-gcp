@@ -18,13 +18,13 @@ read_input() {
     local prompt="$1"
     local default="$2"
     local input
-    
+
     if [ -n "$default" ]; then
         prompt="$prompt [$default]"
     fi
-    
+
     read -p "$prompt: " input
-    
+
     if [ -z "$input" ] && [ -n "$default" ]; then
         echo "$default"
     else
@@ -146,7 +146,7 @@ read -p "Do you want to apply the Terraform plan? (y/n): " apply_confirmation
 if [ "$apply_confirmation" == "y" ] || [ "$apply_confirmation" == "Y" ]; then
     echo "Applying Terraform plan..."
     terraform apply terraform.plan
-    
+
     echo
     echo "Terraform apply completed."
     echo "Kafka cluster outputs:"

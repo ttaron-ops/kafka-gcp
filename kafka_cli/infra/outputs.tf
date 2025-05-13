@@ -10,22 +10,22 @@ output "region" {
 
 output "vpc_name" {
   description = "The VPC name"
-  value       = var.vpc_enabled ? var.vpc_name : "N/A"
+  value       = var.vpc_enabled ? var.vpc.vpc_name : "N/A"
 }
 
 output "subnet_cidr" {
   description = "The subnet CIDR range"
-  value       = var.vpc_enabled ? var.subnet_cidr : "N/A"
+  value       = var.vpc_enabled ? var.vpc.main_cidr : "N/A"
 }
 
 output "kafka_brokers" {
   description = "List of Kafka broker instance names"
-  value       = google_compute_instance.kafka_broker[*].name
+  value       = google_compute_instance.kafka[*].name
 }
 
 output "kafka_broker_ips" {
   description = "List of Kafka broker internal IPs"
-  value       = google_compute_instance.kafka_broker[*].network_interface[0].network_ip
+  value       = google_compute_instance.kafka[*].network_interface[0].network_ip
 }
 
 output "kafka_version" {

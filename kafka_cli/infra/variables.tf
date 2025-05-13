@@ -46,6 +46,18 @@ variable "resource_prefix" {
   default     = "kafka"
 }
 
+variable "terraform_state_bucket" {
+  description = "GCS bucket name for Terraform state"
+  type        = string
+  default     = "kafka-terraform-state"
+}
+
+variable "terraform_state_prefix" {
+  description = "Prefix for Terraform state files in GCS bucket"
+  type        = string
+  default     = "terraform/state"
+}
+
 #################################
 ###     ENABLE/DISABLE        ###
 #################################
@@ -77,6 +89,30 @@ variable "kafka_ui_enabled" {
 #################################
 ###           VPC             ###
 #################################
+
+variable "public_ingress_ip_count" {
+  description = "Number of public ingress IPs to create"
+  type        = number
+  default     = 0
+}
+
+variable "public_ingress_ip_name" {
+  description = "Base name for public ingress IPs"
+  type        = string
+  default     = "public-ingress"
+}
+
+variable "private_ingress_ip_count" {
+  description = "Number of private ingress IPs to create"
+  type        = number
+  default     = 0
+}
+
+variable "private_ingress_ip_name" {
+  description = "Base name for private ingress IPs"
+  type        = string
+  default     = "private-ingress"
+}
 
 variable "vpc" {
   description = "VPC configuration"

@@ -1,26 +1,39 @@
-resource "aws_instance" "kafka" {
-  count         = var.kafka_instance_count
-  ami           = var.kafka_ami_id
-  instance_type = var.kafka_instance_type
+resource "google_compute_instance" "kafka" {
+  count        = var.kafka_broker_count
+  name         = "${var.resource_prefix}-broker-${count.index}"
+  machine_type = var.machine_type
+  zone         = var.zone
 
-  tags = merge(
-    var.kafka_tags,
-    {
-      Name = "kafka-instance-${count.index}"
+  tags = ["kafka-broker"]
+
+  boot_disk {
+    initialize_params {
+      image  = var.disk_image
+      size   = var.disk_size_gb
+      type   = "pd-standard"
     }
-  )
+  }
 
   network_interface {
-    device_index         = 0
-    subnet_id            = var.kafka_subnet_id
-    associate_public_ip_address = var.kafka_associate_public_ip
-    security_groups      = var.kafka_security_groups
+    network = var.vpc_enabled ? google_compute_network.vpc[0].name : "default"
+    subnetwork = var.vpc_enabled ? google_compute_subnetwork.subnet[0].name : null
+    access_config {
+      // Ephemeral public IP
+    }
   }
 
-  root_block_device {
-    volume_size = var.kafka_root_volume_size
-    volume_type = var.kafka_root_volume_type
+  metadata = {
+    ssh-keys = "${var.ssh_user}:${var.ssh_pub_key}"
+    kafka_version = var.kafka_version
+    kafka_broker_count = var.kafka_broker_count
+    default_partitions = var.default_partitions
+    default_replication_factor = var.default_replication_factor
+    min_insync_replicas = var.min_insync_replicas
   }
 
-  user_data = var.kafka_user_data
+  metadata_startup_script = file("${path.module}/kafka_bootstrap.sh")
+
+  service_account {
+    scopes = ["cloud-platform"]
+  }
 }
