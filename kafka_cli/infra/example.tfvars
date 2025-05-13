@@ -1,31 +1,34 @@
-# app_project = {
-#   name            = "c8r-dev",
-#   id              = "c8r-dev",
-# }
-
-project_id = "c8r-test"
+# Project Configuration
+project_id   = "c8r-test"
 project_name = "c8r-test"
-region = "us-west3"
+region       = "us-west3"
+zone         = "us-west3-a"
 
+# Feature Flags
+vpc_enabled         = true
+keyring_enabled     = false
 vpc_peering_enabled = false
+kafka_ui_enabled    = false
 
-# vpc_peering = [
-#   {
-#     name         = "staging-to-ops"
-#     peer_network = "projects/c8r-operations/global/networks/ops-vpc"
-#   }
-# ]
-
-
+# VPC Configuration
 vpc = {
-  vpc-name                = "kafka-vpc",
-  default-subnet-creation = "false",
-  subnet-name             = "vpc-subnet",
-  proxy-subnet-name       = "proxy-only-subnet",
-  proxy-subnet-cidr       = "10.101.0.0/16",
-  main-cidr               = "10.1.0.0/16",
+  vpc_name                = "kafka-vpc"
+  default_subnet_creation = false
+  subnet_name            = "vpc-subnet"
+  proxy_subnet_name      = "proxy-only-subnet"
+  proxy_subnet_cidr      = "10.101.0.0/16"
+  main_cidr              = "10.1.0.0/16"
 }
 
+# VPC Peering Configuration
+vpc_peering = [
+  {
+    name         = "staging-to-ops"
+    peer_network = "projects/c8r-operations/global/networks/ops-vpc"
+  }
+]
+
+# Firewall Rules
 vpc_firewall = [
   {
     name          = "allow-ssh-v4"
@@ -135,54 +138,52 @@ vpc_firewall = [
   }
 ]
 
+# KMS Configuration
+keyrings = [
+  {
+    ring_name = "c8r-staging"
+    keys = [
+      {
+        name                 = "c8r-general"
+        rotation_period      = "86400s"
+        purpose              = "ENCRYPT_DECRYPT"
+        key_algorithm        = "GOOGLE_SYMMETRIC_ENCRYPTION"
+        key_protection_level = "SOFTWARE"
+        labels               = {}
+      },
+      {
+        name                 = "c8r-storage"
+        rotation_period      = "86400s"
+        purpose              = "ENCRYPT_DECRYPT"
+        key_algorithm        = "GOOGLE_SYMMETRIC_ENCRYPTION"
+        key_protection_level = "SOFTWARE"
+        labels               = {}
+      },
+      {
+        name                 = "c8r-secrets"
+        rotation_period      = "86400s"
+        purpose              = "ENCRYPT_DECRYPT"
+        key_algorithm        = "GOOGLE_SYMMETRIC_ENCRYPTION"
+        key_protection_level = "SOFTWARE"
+        labels               = {}
+      }
+    ]
+  }
+]
 
+# Compute Configuration
+instance_count = 3
+machine_type   = "e2-medium"
+disk_image     = "debian-cloud/debian-11"
+disk_size_gb   = 50
 
+# Kafka Configuration
+kafka_broker_count         = 3
+kafka_version             = "3.6.0"
+default_partitions        = 3
+default_replication_factor = 3
+min_insync_replicas       = 2
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# keyring_enabled     = false
-# gke_enabled         = false
-
-# keyrings = [
-#   {
-#     ring_name = "c8r-staging"
-#     keys = [
-#       {
-#         name                 = "c8r-general"
-#         rotation_period      = "86400s"
-#         purpose              = "ENCRYPT_DECRYPT"
-#         key_algorithm        = "GOOGLE_SYMMETRIC_ENCRYPTION"
-#         key_protection_level = "SOFTWARE"
-#         labels               = {}
-#       },
-#       {
-#         name                 = "c8r-storage"
-#         rotation_period      = "86400s"
-#         purpose              = "ENCRYPT_DECRYPT"
-#         key_algorithm        = "GOOGLE_SYMMETRIC_ENCRYPTION"
-#         key_protection_level = "SOFTWARE"
-#         labels               = {}
-#       },
-#       {
-#         name                 = "c8r-secrets"
-#         rotation_period      = "86400s"
-#         purpose              = "ENCRYPT_DECRYPT"
-#         key_algorithm        = "GOOGLE_SYMMETRIC_ENCRYPTION"
-#         key_protection_level = "SOFTWARE"
-#         labels               = {}
-#       }
-#     ]
-#   }
-# ]
+# SSH Configuration
+ssh_user    = "kafka"
+ssh_pub_key = "YOUR_SSH_PUBLIC_KEY_HERE"

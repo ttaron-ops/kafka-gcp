@@ -78,16 +78,33 @@ variable "kafka_ui_enabled" {
 ###           VPC             ###
 #################################
 
-variable "vpc_name" {
-  description = "VPC Name"
-  type        = string
-  default     = "application-vpc"
+variable "vpc" {
+  description = "VPC configuration"
+  type = object({
+    vpc_name                = string
+    default_subnet_creation = bool
+    subnet_name            = string
+    proxy_subnet_name      = string
+    proxy_subnet_cidr      = string
+    main_cidr              = string
+  })
+  default = {
+    vpc_name                = "kafka-vpc"
+    default_subnet_creation = false
+    subnet_name            = "vpc-subnet"
+    proxy_subnet_name      = "proxy-only-subnet"
+    proxy_subnet_cidr      = "10.101.0.0/16"
+    main_cidr              = "10.1.0.0/16"
+  }
 }
 
-variable "subnet_cidr" {
-  description = "CIDR range for the VPC subnet"
-  type        = string
-  default     = "10.0.0.0/24"
+variable "vpc_peering" {
+  description = "VPC peering configurations"
+  type = list(object({
+    name         = string
+    peer_network = string
+  }))
+  default = []
 }
 
 variable "vpc_firewall" {
