@@ -1,0 +1,2 @@
+[console_scripts]
+kafka-cli = kafka_cli.main:app

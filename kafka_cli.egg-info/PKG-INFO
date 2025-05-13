@@ -1,0 +1,83 @@
+Metadata-Version: 2.4
+Name: kafka-cli
+Version: 0.1.0
+Summary: Interactive CLI tool for provisioning and managing Kafka clusters on GCP
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: typer>=0.9.0
+Requires-Dist: questionary>=2.0.1
+Requires-Dist: rich>=13.4.2
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: python-terraform>=0.10.1
+Requires-Dist: google-cloud-compute>=1.12.0
+Requires-Dist: google-cloud-container>=2.30.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: kubernetes>=28.1.0
+Requires-Dist: click>=8.1.6
+Requires-Dist: httpx>=0.24.1
+Requires-Dist: python-dotenv>=1.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.3.1; extra == "dev"
+Requires-Dist: black>=23.3.0; extra == "dev"
+Requires-Dist: isort>=5.12.0; extra == "dev"
+Requires-Dist: flake8>=6.0.0; extra == "dev"
+Requires-Dist: mypy>=1.3.0; extra == "dev"
+Dynamic: license-file
+
+# Kafka-CLI
+
+Interactive command-line tool for provisioning and managing Kafka clusters on GCP.
+
+## Features
+
+- ⚡️ **Interactive Wizard**: Step-by-step guided configuration of Kafka clusters
+- 🏗 **Automated Infrastructure Provisioning**: Uses Terraform to provision cloud resources
+- 🌐 **Dynamic Networking**: Custom VPC configurations and security integrations
+- ➕ **Addon Marketplace**: Seamless deployment of optional tools (Kafka UI, Prometheus, etc.)
+- ☁️ **Flexible Deployment Targets**: Deploy to GCP or existing Kubernetes clusters
+- 💾 **Profiles & Configuration Management**: Save and reuse cluster configurations
+- 🧪 **Dry-Run Mode**: Preview infrastructure changes safely
+- 🩺 **Health Checks**: Built-in commands to verify status of resources
+- 🔧 **Custom Helm Values Support**: Override default configurations
+- 🚀 **CLI Auto-Updater**: Keep your tool up-to-date
+
+## Installation
+
+```bash
+# Install from PyPI
+pip install kafka-cli
+
+# Or install in development mode
+git clone https://github.com/your-username/kafka-cli.git
+cd kafka-cli
+pip install -e .
+```
+
+## Quick Start
+
+```bash
+# Start the interactive wizard
+kafka-cli start
+
+# List available profiles
+kafka-cli profiles list
+
+# Check cluster health
+kafka-cli health check --profile my-cluster
+```
+
+## Requirements
+
+- Python 3.11+
+- Terraform 1.0+
+- GCP account with appropriate permissions
+- kubectl (for Kubernetes deployments)
+
+## Documentation
+
+For detailed documentation, see [docs/](docs/).
+
+## License
+
+MIT
